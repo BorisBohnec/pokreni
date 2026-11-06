@@ -9,5 +9,15 @@
     <uses-permission android:name="android.permission.health.WRITE_ACTIVE_CALORIES_BURNED" />
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
+        <package android:name="app.tanjur.tracker" />
+        <package android:name="app.pokreni.trainer" />
     </queries>
+
+    <application>
+        <!-- content://<applicationId>.share/share: this app's share.json, readable only by Tanjur and PoKreni -->
+        <provider
+            android:name="app.borisbohnec.hcbridge.ShareProvider"
+            android:authorities="${applicationId}.share"
+            android:exported="true" />
+    </application>
 </manifest>

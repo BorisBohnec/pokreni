@@ -33,6 +33,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
@@ -371,6 +372,32 @@ class HcBridgePlugin : Plugin() {
     }
 
     // ---------- the other app ----------
+
+    /**
+     * { pkg } reads the companion app's share.json through its ShareProvider.
+     * Resolves { found: true, json } or { found: false, reason } (not installed, never opened, or refused).
+     */
+    @PluginMethod
+    fun readShared(call: PluginCall) {
+        val pkg = call.getString("pkg")
+        if (pkg.isNullOrBlank() || pkg !in ShareProvider.COMPANIONS) { call.reject("Unknown app", "ARGS"); return }
+        scope.launch {
+            val res = JSObject()
+            try {
+                val json = withContext(Dispatchers.IO) {
+                    context.contentResolver.query(Uri.parse("content://$pkg.share/share"), null, null, null, null)?.use { c ->
+                        if (c.moveToFirst()) c.getString(0) else null
+                    }
+                }
+                if (json != null) { res.put("found", true); res.put("json", json) } else { res.put("found", false); res.put("reason", "empty") }
+            } catch (e: SecurityException) {
+                res.put("found", false); res.put("reason", "refused")
+            } catch (e: Exception) {
+                res.put("found", false); res.put("reason", "missing")
+            }
+            call.resolve(res)
+        }
+    }
 
     /** { url } opens a deep link such as tanjur://today. Resolves { opened } instead of failing. */
     @PluginMethod

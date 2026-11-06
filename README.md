@@ -39,6 +39,10 @@ Pushes to other branches build the APK too (download it from the run's artifacts
 
 ## How it works with Tanjur
 
+The two apps read each other directly, with no setup: each writes a small `share.json` into its private folder, and `plugins/hc-bridge` exposes it through a content provider that only Tanjur and PoKreni may read. PoKreni gets your weight, name, targets and today's meals from Tanjur this way; Tanjur gets your sessions and walks from PoKreni. Typing your weight into PoKreni is only needed when Tanjur has none.
+
+Health Connect is optional on top of that:
+
 | Direction | What |
 | --- | --- |
 | PoKreni → Health Connect | Each finished session (strength training) and each walk or ride, with estimated active calories |
@@ -46,6 +50,8 @@ Pushes to other branches build the APK too (download it from the run's artifacts
 | Tanjur → Health Connect | Weigh-ins and meal nutrition (kcal, protein, carbs, fat), when switched on in Tanjur |
 | Health Connect → PoKreni | Weight, last night's sleep, steps, workouts from your watch, and protein from Tanjur |
 | Deep links | `pokreni://today`, `pokreni://train`, `pokreni://cardio`, `pokreni://learn`; PoKreni opens `tanjur://today` and `tanjur://add` |
+
+On Android, Capacitor plugins' `addListener()` returns a plain `{ remove }` object when `@capacitor/core` isn't bundled (it isn't here), so `app.js` attaches every native listener through `listen()`; a test checks this. Back closes the open sheet, then returns to Today, then leaves the app.
 
 `@capgo/capacitor-health` reads most things but can't write exercise sessions and only writes nutrition as energy. `plugins/hc-bridge` is one Kotlin file that fills those gaps, using stable record IDs so editing or deleting something in either app updates Health Connect instead of duplicating it. The same folder is in the Tanjur repo.
 

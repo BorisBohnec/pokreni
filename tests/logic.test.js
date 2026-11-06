@@ -171,3 +171,10 @@ test('lessons: 19 lessons, both languages, quiz answers valid, linked exercises 
     if (l.check.type === 'auto') assert.ok(PK.autoCheck(l.id, { sessions: [], cardio: [], baselines: [] }, '2026-11-07'), `${l.id} has an auto check`);
   }
 });
+
+test('native listeners only go through listen(): addListener() is not a Promise on Android', () => {
+  const fs = require('node:fs');
+  const src = fs.readFileSync(require.resolve('../www/app.js'), 'utf8');
+  const uses = src.split('\n').filter(l => /\.addListener\(/.test(l) && !/plugin\.addListener/.test(l) && !/function listen/.test(l));
+  assert.deepEqual(uses, []);
+});

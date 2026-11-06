@@ -55,6 +55,7 @@ const ICONS = {
   lock: '<rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
   flag: '<path d="M6 21V4.5M6 5h11l-2.5 4L17 13H6"/>',
   up: '<path d="M6 15l6-6 6 6"/>',
+  minus: '<path d="M5 12h14"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
   sync: '<path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9M4.5 12a7.5 7.5 0 0 1 13.2-4.9"/><path d="M18.5 3.5v4h-4M5.5 20.5v-4h4"/>'
 };
@@ -73,6 +74,15 @@ const Native = (() => {
   return { native, Filesystem: get('Filesystem'), Notif: get('LocalNotifications'), Health: get('Health'), Bridge: get('HcBridge'), App: get('App'), Awake: get('KeepAwake'), Haptics: get('Haptics'), Share: get('Share') };
 })();
 
+/* Without @capacitor/core bundled, a native plugin's addListener() returns a plain { remove } object, not a Promise.
+   Never chain .catch() on it directly; this wrapper works with either shape and never throws. */
+function listen(plugin, event, cb) {
+  if (!plugin || typeof plugin.addListener !== 'function') return null;
+  try { const h = plugin.addListener(event, cb); if (h && typeof h.catch === 'function') h.catch(() => {}); return h; }
+  catch (e) { return null; }
+}
+const call = (p, method, args) => { try { return p && typeof p[method] === 'function' ? Promise.resolve(p[method](args)) : Promise.reject(new Error('unavailable')); } catch (e) { return Promise.reject(e); } };
+
 /* ---------- state ---------- */
 const DATA_FILE = 'pokreni-data.json', LS_KEY = 'pokreni.data.v1';
 const DEFAULT_PROFILE = () => ({ name: '', lang: /^hr\b/i.test(navigator.language || '') ? 'hr' : 'en', gymDays: [1, 3, 5], homeDays: [2, 4, 6], planSet: false, restSec: 90, sound: true });
@@ -81,9 +91,10 @@ const S = {
   program: { id: 'foundations', next: 0 }, lifts: {}, sessions: [], cardio: [], active: null,
   settings: { health: { on: false }, remind: { on: false, time: '16:30' } },
   hc: { weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, syncedAt: 0, granted: [] },
+  tanjur: null,
   savedAt: 0
 };
-const U = { tab: 'today', rest: null, tick: 0, sheets: [], hcBusy: false, tanjur: null, gradDismissed: false };
+const U = { tab: 'today', rest: null, tick: 0, sheets: [], hcBusy: false, tanjur: null, tjState: '', tjAt: 0, gradDismissed: false };
 
 function applyData(d) {
   if (!d || typeof d !== 'object') return;
@@ -99,12 +110,13 @@ function applyData(d) {
   S.active = d.active && d.active.items ? d.active : null;
   S.settings = Object.assign({ health: { on: false }, remind: { on: false, time: '16:30' } }, d.settings || {});
   S.hc = Object.assign({ weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, syncedAt: 0, granted: [] }, d.hc || {});
+  S.tanjur = d.tanjur && d.tanjur.app === 'tanjur' ? d.tanjur : null;
   S.savedAt = d.savedAt || 0;
 }
 function snapshot() {
   S.savedAt = Date.now();
   return JSON.stringify({ app: 'pokreni', version: 1, savedAt: S.savedAt, profile: S.profile, readiness: S.readiness, baselines: S.baselines, lessons: S.lessons, quiz: S.quiz,
-    program: S.program, lifts: S.lifts, sessions: S.sessions, cardio: S.cardio, active: S.active, settings: S.settings, hc: S.hc });
+    program: S.program, lifts: S.lifts, sessions: S.sessions, cardio: S.cardio, active: S.active, settings: S.settings, hc: S.hc, tanjur: S.tanjur });
 }
 let saveTimer = 0, saveChain = Promise.resolve(), dirty = false, warned = false;
 function persist() { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flushSave, 300); }
@@ -116,9 +128,22 @@ function flushSave() {
   try { localStorage.setItem(LS_KEY, json); } catch (e) { /* the file is the main copy */ }
   if (Native.Filesystem) {
     saveChain = saveChain.then(() => Native.Filesystem.writeFile({ path: DATA_FILE, data: json, directory: 'DATA', encoding: 'utf8' }))
-      .catch(() => { if (!warned) { warned = true; toast(t('saveFail')); } });
+      .catch(() => { if (!warned) { warned = true; toast(t('saveFail')); } })
+      .then(writeShare);
   }
   return saveChain;
+}
+/* share.json: the last 14 days of sessions and walks, read by Tanjur through the bridge's ShareProvider,
+   so Tanjur counts them even without Health Connect. */
+function shareJSON() {
+  const from = addDays(today(), -14), w = [];
+  S.sessions.filter(s => s.date >= from).forEach(s => w.push({ id: s.id, kind: 'session', title: tx(s.name), date: s.date, start: s.start, minutes: PK.sessionMinutes(s), kcal: s.kcal || 0, type: 'strength' }));
+  S.cardio.filter(c => c.date >= from).forEach(c => w.push({ id: 'c-' + c.id, kind: 'cardio', title: exName(c.type), date: c.date, start: c.start, minutes: c.minutes, kcal: c.kcal || 0, type: (EX.byId[c.type] || {}).hc || 'other' }));
+  return JSON.stringify({ app: 'pokreni', v: 1, at: new Date().toISOString(), workouts: w });
+}
+function writeShare() {
+  if (!Native.Filesystem) return Promise.resolve();
+  return call(Native.Filesystem, 'writeFile', { path: 'share.json', data: shareJSON(), directory: 'DATA', encoding: 'utf8' }).catch(() => {});
 }
 function loadLocal() { try { const r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
 async function loadFile() {
@@ -133,7 +158,22 @@ const canGym = () => ['clear', 'cleared'].includes(readiness());
 const program = () => PR.programs[S.program.id] || PR.programs.foundations;
 const doneInProgram = () => PK.sessionsIn(S.sessions, S.program.id);
 const nextTemplate = () => { const p = program(); return p.templates[(S.program.next || 0) % p.templates.length]; };
-const bodyKg = () => (S.hc.weight && S.hc.weight.kg) || num(S.profile.kg) || null;
+/* Weight comes from Tanjur first, then Health Connect; typing it in is only the fallback. */
+function weightSource() {
+  const tw = S.tanjur && S.tanjur.weight;
+  if (tw && +tw.kg > 25) return { kg: +tw.kg, date: tw.date, src: 'tanjur' };
+  if (S.hc.weight && +S.hc.weight.kg > 25) return { kg: +S.hc.weight.kg, date: S.hc.weight.date, src: 'hc' };
+  const m = num(S.profile.kg); return m ? { kg: m, date: null, src: 'manual' } : null;
+}
+const bodyKg = () => { const w = weightSource(); return w ? w.kg : null; };
+const displayName = () => S.profile.name || (S.tanjur && S.tanjur.profile && S.tanjur.profile.name) || '';
+/* Today's food from Tanjur, or null when Tanjur hasn't shared anything for today. */
+function tanjurToday() {
+  const T = S.tanjur; if (!T) return null;
+  const k = today();
+  const day = (T.days && T.days[k]) || null;
+  return { day, meals: T.today === k ? (T.meals || []) : [], targets: T.targets || null, at: T.at };
+}
 const extMinutes = () => S.hc.ext || {};
 function lessonDone(id) {
   const l = LS.byId[id]; if (!l) return false;
@@ -180,13 +220,15 @@ function renderAll() {
   document.documentElement.lang = LANG;
   paintChrome();
   $$('.view').forEach(v => { v.hidden = v.id !== 'view-' + U.tab; });
-  if (U.tab === 'today') renderToday();
-  if (U.tab === 'learn') renderLearn();
-  if (U.tab === 'train') renderTrain();
-  if (U.tab === 'progress') renderProgress();
-  if (U.tab === 'profile') renderProfile();
-  renderRestBar();
-  if (U.sheets.length) renderSheet();
+  const views = { today: renderToday, learn: renderLearn, train: renderTrain, progress: renderProgress, profile: renderProfile };
+  safely(views[U.tab], '#view-' + U.tab);
+  safely(renderRestBar);
+  if (U.sheets.length) safely(renderSheet, '#sheetBody');
+}
+/* One broken card never blanks the whole screen: the error is shown in place so it can be reported. */
+function safely(fn, sel) {
+  try { if (fn) fn(); }
+  catch (e) { console.error(e); const el = sel && $(sel); if (el) el.innerHTML = `<section class="card callout warn"><h2>${icon('alert')}${esc(t('oops'))}</h2><p class="small">${esc(String(e && e.message || e))}</p><button class="btn" data-act="reload">${esc(t('reload'))}</button></section>`; }
 }
 function setTab(tab) {
   if (tab === 'train' && !S.active) tab = 'today';
@@ -207,7 +249,7 @@ function paintChrome() {
 function renderToday() {
   const el = $('#view-today'), k = today(), d = new Date();
   const r = readiness();
-  const hello = S.profile.name ? t('helloName', { name: S.profile.name }) : t('hello');
+  const hello = displayName() ? t('helloName', { name: displayName() }) : t('hello');
   let html = `<header class="view-head"><div><div class="eyebrow">${esc(fullDate(k))}</div><h1>${esc(hello)}</h1></div></header>`;
   if (r === 'todo') html += `<section class="card callout"><h2>${esc(t('firstThings'))}</h2><p>${esc(t('firstThingsBody'))}</p>
     <div class="row2"><button class="btn primary" data-act="readiness">${icon('heart')}${esc(t('readinessBtn'))}</button><button class="btn ghost" data-act="lesson" data-id="L01">${icon('book')}${esc(t('lesson1'))}</button></div></section>`;
@@ -266,11 +308,21 @@ function weekCard(k) {
   </section>`;
 }
 function foodCard(k) {
+  const tj = tanjurToday();
+  const btns = `<div class="row2"><button class="btn" data-act="tanjur" data-path="add">${esc(t('logMeal'))}</button><button class="btn ghost" data-act="tanjur" data-path="today">${esc(t('openTanjur'))}</button></div>`;
+  const head = `<div class="card-head"><h2>${icon('plate')}${esc(t('fuel'))}</h2><span class="muted small">Tanjur${tj && tj.at ? ' · ' + esc(clock(new Date(tj.at))) : ''}</span></div>`;
+  if (tj) {
+    const d = tj.day || { kcal: 0, protein: 0 }, T = tj.targets;
+    const meter = (v, goal) => `<div class="meter"><span style="width:${goal ? clamp(v / goal * 100, 0, 100) : 0}%"></span></div>`;
+    const meals = tj.meals.length ? `<ul class="act-list food-list">${tj.meals.map(m => `<li><div class="act-row"><span class="food-time">${esc(m.time || '')}</span><span class="act-main">${esc(m.name || '')}<small>P ${n0(m.protein)} g</small></span><span class="act-meta">${n0(m.kcal)} kcal</span></div></li>`).join('')}</ul>` : `<p class="muted small">${esc(t('noMealsToday'))}</p>`;
+    return `<section class="card tanjur">${head}
+      <div class="fuel-grid"><div><div class="fuel-num">${n0(d.protein)}<small>${T && T.protein ? ' / ' + n0(T.protein) : ''} g</small></div><div class="stat-lab">${esc(t('protein'))}</div>${T && T.protein ? meter(d.protein, T.protein) : ''}</div>
+        <div><div class="fuel-num">${n0(d.kcal)}<small>${T && T.kcal ? ' / ' + n0(T.kcal) : ''} kcal</small></div><div class="stat-lab">${esc(t('energy'))}</div>${T && T.kcal ? meter(d.kcal, T.kcal) : ''}</div></div>
+      ${meals}${btns}</section>`;
+  }
   const p = S.hc.protein && S.hc.protein[k];
-  const on = S.settings.health && S.settings.health.on;
-  return `<section class="card tanjur"><div class="card-head"><h2>${icon('plate')}${esc(t('fuel'))}</h2><span class="muted small">Tanjur</span></div>
-    ${on && p ? `<p class="fuel-line"><b>${n0(p.protein)} g</b> ${esc(t('proteinToday'))} · ${n0(p.kcal)} kcal</p>` : `<p class="muted small">${esc(on ? t('fuelNoData') : t('fuelConnect'))}</p>`}
-    <div class="row2"><button class="btn" data-act="tanjur" data-path="add">${esc(t('logMeal'))}</button><button class="btn ghost" data-act="tanjur" data-path="today">${esc(t('openTanjur'))}</button></div></section>`;
+  const msg = p ? `<p class="fuel-line"><b>${n0(p.protein)} g</b> ${esc(t('proteinToday'))} · ${n0(p.kcal)} kcal</p>` : `<p class="muted small">${esc(U.tjState === 'refused' ? t('tanjurRefused') : t('tanjurNotYet'))}</p>`;
+  return `<section class="card tanjur">${head}${msg}${btns}</section>`;
 }
 
 /* ---------- learn ---------- */
@@ -346,7 +398,7 @@ function trainItem(it, i) {
     ${ex.note ? `<p class="banner info">${icon('info')}${esc(tx(ex.note))}</p>` : ''}
     ${firstTime ? `<p class="hint">${esc(t('firstLoadHint'))}</p>` : ''}
     <div class="sets">${setHeader(ex, item)}${rows}</div>
-    <div class="ti-tools"><button class="btn small ghost" data-act="ex" data-id="${ex.id}">${icon('info')}${esc(t('howTo'))}</button>${swap}${!item.mins ? `<button class="btn small ghost" data-act="add-set" data-i="${i}">${icon('plus')}${esc(t('addSet'))}</button>` : ''}</div>
+    <div class="ti-tools"><button class="btn small ghost" data-act="ex" data-id="${ex.id}">${icon('info')}${esc(t('howTo'))}</button>${swap}${!item.mins ? `<button class="btn small ghost" data-act="add-set" data-i="${i}">${icon('plus')}${esc(t('addSet'))}</button>${it.sets.length > 1 ? `<button class="btn small ghost" data-act="del-set" data-i="${i}">${icon('minus')}${esc(t('removeSet'))}</button>` : ''}` : ''}</div>
     ${pain}</section>`;
 }
 function setHeader(ex, item) {
@@ -589,9 +641,9 @@ function renderProfile() {
   const rState = { todo: ['warn', t('rTodo')], clear: ['good', t('rClear')], doctor: ['crit', t('rDoctor')], cleared: ['good', t('rCleared')] }[r];
   el.innerHTML = `<header class="view-head"><div><div class="eyebrow">PoKreni</div><h1>${esc(t('tabProfile'))}</h1></div></header>
     <section class="card"><h2>${esc(t('you'))}</h2>
-      <label class="field"><span>${esc(t('name'))}</span><input id="pf-name" value="${esc(P.name)}" autocomplete="given-name"></label>
+      <label class="field"><span>${esc(t('name'))}</span><input id="pf-name" value="${esc(P.name)}" placeholder="${esc(displayName())}" autocomplete="given-name"></label>
       <label class="field"><span>${esc(t('language'))}</span><select id="pf-lang"><option value="en" ${LANG === 'en' ? 'selected' : ''}>English</option><option value="hr" ${LANG === 'hr' ? 'selected' : ''}>Hrvatski</option></select></label>
-      <label class="field"><span>${esc(t('weightKg'))}</span><input id="pf-kg" type="number" inputmode="decimal" step="0.1" value="${esc(P.kg ?? '')}" placeholder="${S.hc.weight ? esc(n1(S.hc.weight.kg)) : ''}"><small class="muted">${esc(S.hc.weight ? t('weightFromHc', { kg: n1(S.hc.weight.kg), date: shortDate(S.hc.weight.date) }) : t('weightWhy'))}</small></label>
+      ${weightField()}
     </section>
     <section class="card"><div class="card-head"><h2>${esc(t('readinessTitle'))}</h2>${chip(rState[0], rState[1])}</div>
       <p class="muted small">${esc(S.readiness && S.readiness.answeredAt ? t('answeredOn', { date: fullDate(S.readiness.answeredAt) }) : t('readinessWhy'))}</p>
@@ -610,13 +662,18 @@ function renderProfile() {
       ${program().id !== 'foundations' ? `<button class="btn small ghost" data-act="program" data-id="foundations">${esc(t('backToFoundations'))}</button>` : ''}</section>
     <section class="card"><div class="card-head"><h2>Health Connect</h2>${chip(hs.on ? 'good' : 'info', hs.on ? t('on') : t('off'))}</div>
       ${hcBody()}</section>
-    <section class="card"><h2>Tanjur</h2><p class="muted small">${esc(t('tanjurAbout'))}</p>
-      <div class="row2"><button class="btn" data-act="tanjur" data-path="today">${esc(t('openTanjur'))}</button></div>
-      ${U.tanjur === false ? `<p class="small">${chip('warn', t('tanjurMissing'))}</p>` : ''}</section>
+    <section class="card"><div class="card-head"><h2>Tanjur</h2>${S.tanjur ? chip('good', t('linked')) : chip('warn', t('notLinked'))}</div>
+      <p class="muted small">${esc(S.tanjur ? t('tanjurLinkedAbout', { time: S.tanjur.at ? shortDate(dkey(new Date(S.tanjur.at))) + ', ' + clock(new Date(S.tanjur.at)) : '' }) : U.tanjur === false ? t('tanjurMissing') : U.tjState === 'refused' ? t('tanjurRefused') : t('tanjurNotYet'))}</p>
+      <div class="row2"><button class="btn" data-act="tanjur" data-path="today">${esc(t('openTanjur'))}</button><button class="btn ghost" data-act="tj-refresh">${icon('sync')}${esc(t('refresh'))}</button></div></section>
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.0 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.1 · ${esc(t('aboutLine'))}</p>`;
+}
+function weightField() {
+  const w = weightSource();
+  if (w && w.src !== 'manual') return `<div class="field"><span>${esc(t('weightKg'))}</span><div class="readonly-val"><b>${n1(w.kg)} kg</b><small>${esc(t(w.src === 'tanjur' ? 'weightFromTanjur' : 'weightFromHcShort', { date: w.date ? shortDate(w.date) : '' }))}</small></div></div>`;
+  return `<label class="field"><span>${esc(t('weightKg'))}</span><input id="pf-kg" type="number" inputmode="decimal" step="0.1" value="${esc(S.profile.kg ?? '')}"><small class="muted">${esc(t('weightManual'))}</small></label>`;
 }
 function hcBody() {
   const hs = S.settings.health || {};
@@ -632,7 +689,9 @@ function hcBody() {
 }
 
 /* ---------- sheets ---------- */
-function openSheet(kind, args) {
+/* replace: swap the top sheet for this one (exercise → easier/harder exercise), so Back returns to where you started. */
+function openSheet(kind, args, replace) {
+  if (replace && U.sheets.length) { U.sheets[U.sheets.length - 1] = { kind, args: args || {} }; renderSheet(); $('#sheetPanel').scrollTop = 0; return; }
   U.sheets.push({ kind, args: args || {} });
   try { history.pushState({ sheet: U.sheets.length }, ''); } catch (e) { /* optional */ }
   const el = $('#sheet');
@@ -864,6 +923,22 @@ async function writeCardioHC(c) {
 async function deleteHC(ids) { if (!hcWriteOk() || !ids.length) return; try { await Native.Bridge.deleteExercise({ ids }); } catch (e) { /* ignore */ } }
 
 /* ---------- Tanjur ---------- */
+/* Reads Tanjur's share.json (weight, targets, today's meals, last 14 days) straight from Tanjur through the
+   bridge's ShareProvider. No Health Connect needed. Runs on start and whenever PoKreni comes back to the front. */
+async function readTanjur(force) {
+  if (!Native.Bridge || typeof Native.Bridge.readShared !== 'function') return;
+  if (!force && Date.now() - (U.tjAt || 0) < 3000) return;
+  U.tjAt = Date.now();
+  try {
+    const r = await Native.Bridge.readShared({ pkg: PKG_TANJUR });
+    if (r && r.found && r.json) {
+      const d = JSON.parse(r.json);
+      if (d && d.app === 'tanjur') { S.tanjur = d; U.tjState = 'ok'; U.tanjur = true; persist(); scheduleRender(); return; }
+    }
+    U.tjState = (r && r.reason) || 'missing';
+  } catch (e) { U.tjState = 'missing'; }
+  scheduleRender();
+}
 async function openTanjur(path) {
   const url = 'tanjur://' + (path || 'today');
   if (!Native.Bridge) { toast(t('tanjurPhone')); return; }
@@ -916,12 +991,13 @@ function handleAct(act, b) {
   const id = b.dataset.id;
   switch (act) {
     case 'tab': setTab(b.dataset.tab); break;
+    case 'reload': location.reload(); break;
     case 'go': if (S.active) setTab('train'); else startSession(); break;
     case 'start': startSession(); break;
     case 'lang': setLang(LANG === 'hr' ? 'en' : 'hr'); break;
     case 'sheet-close': closeSheet(); break;
     case 'sheet-back': closeSheet(); break;
-    case 'ex': openSheet('ex', { id }); break;
+    case 'ex': { const top = U.sheets[U.sheets.length - 1]; openSheet('ex', { id }, top && top.kind === 'ex'); break; }
     case 'lesson': openSheet('lesson', { id }); break;
     case 'redflags': openSheet('redflags'); break;
     case 'readiness': U.draftR = null; openSheet('readiness'); break;
@@ -939,6 +1015,13 @@ function handleAct(act, b) {
     case 'warm-toggle': S.active.warmOpen = !S.active.warmOpen; persist(); renderTrain(); break;
     case 'ti-toggle': { const it = S.active.items[+b.dataset.i]; it.open = !it.open; persist(); renderTrain(); break; }
     case 'set-done': toggleSet(+b.dataset.i, +b.dataset.j); break;
+    case 'del-set': {
+      const it = S.active.items[+b.dataset.i];
+      let j = -1; for (let x = it.sets.length - 1; x >= 0; x--) if (!it.sets[x].done) { j = x; break; }
+      if (it.sets.length <= 1) break;
+      if (j < 0) { toast(t('untickFirst')); break; }
+      it.sets.splice(j, 1); persist(); renderTrain(); break;
+    }
     case 'add-set': { const it = S.active.items[+b.dataset.i], last = it.sets[it.sets.length - 1] || {}; it.sets.push({ kg: last.kg ?? '', reps: last.reps ?? '', secs: last.secs ?? '', rir: '', done: false }); persist(); renderTrain(); break; }
     case 'swap': openSheet('swap', { i: +b.dataset.i }); break;
     case 'swap-pick': swapExercise(+b.dataset.i, id); break;
@@ -959,6 +1042,7 @@ function handleAct(act, b) {
     case 'day': { const key = b.dataset.k, d = +b.dataset.d, arr = new Set(S.profile[key] || []); if (arr.has(d)) arr.delete(d); else arr.add(d); S.profile[key] = [...arr].sort(); const other = key === 'gymDays' ? 'homeDays' : 'gymDays'; if (arr.has(d)) S.profile[other] = (S.profile[other] || []).filter(x => x !== d); persist(); scheduleRender(); scheduleReminders(); break; }
     case 'plan-save': if (!(S.profile.gymDays || []).length) { toast(t('pickGymDay')); break; } S.profile.planSet = true; persist(); scheduleRender(); toast(t('planSaved')); break;
     case 'hc-connect': connectHealth(); break;
+    case 'tj-refresh': readTanjur(true).then(() => toast(S.tanjur ? t('synced') : t('tanjurNotYet'))); break;
     case 'hc-sync': syncHealth(true); break;
     case 'hc-manage': if (Native.Health) Native.Health.openHealthConnectSettings().catch(() => toast(t('hcFailed'))); break;
     case 'hc-off': S.settings.health = { on: false }; persist(); scheduleRender(); toast(t('hcStopped')); break;
@@ -1025,31 +1109,39 @@ function bindEvents() {
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { flushSave(); return; }
-    syncHealth(false); checkTanjur();
+    readTanjur(); syncHealth(false); checkTanjur();
     if (U.rest && Date.now() >= U.rest.end) U.rest.alerted = true;
     scheduleRender();
   });
   window.addEventListener('pagehide', () => flushSave());
   window.addEventListener('popstate', () => { if (U.ignorePop) { U.ignorePop = false; return; } if (U.sheets.length) { popClosing = true; closeSheet(); popClosing = false; } });
-  if (Native.App) {
-    Native.App.addListener('appUrlOpen', ev => route(ev && ev.url)).catch(() => {});
-  }
-  if (Native.Notif) {
-    Native.Notif.addListener('localNotificationActionPerformed', ev => { const u = ev && ev.notification && ev.notification.extra && ev.notification.extra.url; if (u) route(u); else if (S.active) setTab('train'); }).catch(() => {});
-  }
+  listen(Native.App, 'appUrlOpen', ev => route(ev && ev.url));
+  listen(Native.App, 'backButton', onBack);
+  listen(Native.Notif, 'localNotificationActionPerformed', ev => { const u = ev && ev.notification && ev.notification.extra && ev.notification.extra.url; if (u) route(u); else if (S.active) setTab('train'); });
+}
+/* Android Back: close the open sheet, then go back to Today, then leave the app. A running session is kept. */
+function onBack() {
+  if (U.sheets.length) { closeSheet(); return; }
+  if (U.tab !== 'today') { setTab('today'); return; }
+  flushSave();
+  call(Native.App, 'exitApp').catch(() => {});
 }
 
 /* ---------- boot ---------- */
 async function boot() {
   applyData(loadLocal() || {});
   LANG = S.profile.lang || 'en';
+  if (S.active) U.tab = 'train';
   bindEvents();
-  if (S.active) { U.tab = 'train'; ensureTick(); keepAwake(true); }
   renderAll();
+  if (S.active) { ensureTick(); keepAwake(true); }
   const fromFile = await loadFile();
   if (fromFile && (fromFile.savedAt || 0) > (S.savedAt || 0)) { applyData(fromFile); LANG = S.profile.lang || 'en'; if (S.active) { U.tab = 'train'; ensureTick(); } renderAll(); }
-  if (Native.App) { try { const l = await Native.App.getLaunchUrl(); if (l && l.url) route(l.url); } catch (e) { /* none */ } }
-  checkTanjur(); syncHealth(false); scheduleReminders();
+  try { const l = await call(Native.App, 'getLaunchUrl'); if (l && l.url) route(l.url); } catch (e) { /* opened normally */ }
+  readTanjur(true); checkTanjur(); syncHealth(false); scheduleReminders(); writeShare();
 }
-window.addEventListener('DOMContentLoaded', boot);
+function start() {
+  boot().catch(e => { console.error(e); safely(() => { throw e; }, '#view-today'); });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

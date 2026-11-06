@@ -4,6 +4,12 @@
   if (typeof module === 'object' && module.exports) module.exports = lib; else root.PK_I18N = lib;
 })(typeof self !== 'undefined' ? self : this, function () {
   const en = {
+    noMealsToday: 'Nothing logged in Tanjur today yet.', protein: 'Protein', energy: 'Energy',
+    tanjurNotYet: 'Couldn\'t read Tanjur yet. Update Tanjur to the latest version and open it once; after that PoKreni reads your weight and meals by itself.', tanjurRefused: 'Tanjur refused the connection. Reinstall both apps from GitHub so they trust each other.',
+    removeSet: 'Set', untickFirst: 'All sets are ticked. Untick one first to remove it.', linked: 'Linked', notLinked: 'Not linked',
+    tanjurLinkedAbout: 'PoKreni reads your weight, targets and today\'s meals straight from Tanjur (last update {time}), and Tanjur reads your sessions from PoKreni. Health Connect isn\'t needed for this.',
+    refresh: 'Refresh', weightFromTanjur: 'From Tanjur, {date}', weightFromHcShort: 'From Health Connect, {date}', weightManual: 'Tanjur and Health Connect have no weight yet, so enter it here. It\'s only used for calorie estimates.',
+    oops: 'Something went wrong here', reload: 'Reload',
     dow0: 'Sunday', dow1: 'Monday', dow2: 'Tuesday', dow3: 'Wednesday', dow4: 'Thursday', dow5: 'Friday', dow6: 'Saturday',
     dowS0: 'Su', dowS1: 'Mo', dowS2: 'Tu', dowS3: 'We', dowS4: 'Th', dowS5: 'Fr', dowS6: 'Sa',
     mon0: 'Jan', mon1: 'Feb', mon2: 'Mar', mon3: 'Apr', mon4: 'May', mon5: 'Jun', mon6: 'Jul', mon7: 'Aug', mon8: 'Sep', mon9: 'Oct', mon10: 'Nov', mon11: 'Dec',
@@ -19,7 +25,7 @@
     sessionN: 'session {n}', aboutMin: '~{m} min', optional: 'optional', startSession: 'Start session',
     thisWeek: 'This week', logCardio: 'Log walk or ride', strengthDays: 'Strength days', activeMinutes: 'Active minutes', weekEmpty: 'Nothing logged yet this week.', fromWatch: 'From your watch or phone',
     nextLesson: 'Next lesson', lessonN: 'Lesson {n}',
-    fuel: 'Food', proteinToday: 'protein today', fuelNoData: 'Nothing from Tanjur today yet.', fuelConnect: 'Connect Health Connect in Profile to see today\'s protein from Tanjur.', logMeal: 'Log a meal', openTanjur: 'Open Tanjur',
+    fuel: 'Food', proteinToday: 'protein today', fuelNoData: 'Nothing from Tanjur today yet.', logMeal: 'Log a meal', openTanjur: 'Open Tanjur',
     retestDue: 'Time to retest', retestDueBody: '{d} days since your last tests. Repeat them to see your progress.', retestBtn: 'Retest', baselineBtn: 'Record baseline', retestNext: 'Next retest from {date}.',
     lessonsDone: '{n} of {total} lessons done', redFlags: 'When to stop', redFlagsShort: 'Chest pain, fainting, sharp joint pain: what to do, in one place.', redFlagsSub: 'Pain traffic light and emergencies',
     library: 'Exercise library', libraryBody: 'Every exercise in PoKreni, with pictures and how-to.',
@@ -44,7 +50,7 @@
     weekPlan: 'Week plan', gymDays: 'Gym days', homeDays: 'Home walk or ride', weekPlanNote: 'Sessions go in order A, B, A, B, so a moved day never breaks the plan.', planSave: 'Save week plan', planSaved: 'Week plan saved', pickGymDay: 'Pick at least one gym day.', planGo: 'Set it in Profile',
     training: 'Training', restDefault: 'Default rest between sets', restNote: 'Each exercise has its own rest; this is used when it has none.', soundOn: 'Beep when rest is over', remindOn: 'Remind me on gym days', remindTime: 'Reminder time',
     programNow: 'Programme: {name}, {n} sessions done.', backToFoundations: 'Back to Foundations',
-    on: 'On', off: 'Off', hcWeb: 'Health Connect works in the Android app.', hcAbout: 'Share your sessions with Tanjur and Samsung Health, and bring in your weight, sleep, steps, watch workouts and Tanjur\'s protein.', hcConnect: 'Connect Health Connect',
+    on: 'On', off: 'Off', hcWeb: 'Health Connect works in the Android app.', hcAbout: 'Optional. Tanjur already gets your sessions directly. Health Connect adds them to Samsung Health and brings in sleep, steps and workouts from your watch.', hcConnect: 'Connect Health Connect',
     hcOnAbout: 'Sessions are shared when you finish them; weight, sleep, protein and other workouts sync when you open PoKreni.', lastSync: 'Last sync {date}, {time}.', hcMissing: 'Some access is off, so parts won\'t sync.', syncNow: 'Sync now', syncing: 'Syncing…', manageAccess: 'Manage access', hcAskAgain: 'Ask for access again', hcStop: 'Stop syncing',
     hcUnavailable: 'Health Connect isn\'t available on this phone.', hcDenied: 'No access was granted, so nothing can sync.', hcFailed: 'Couldn\'t reach Health Connect.', hcStopped: 'Stopped syncing. Remove access fully under Manage access.', synced: 'Synced',
     tanjurAbout: 'Tanjur adds your PoKreni sessions to its calorie budget automatically through Health Connect, and PoKreni shows Tanjur\'s protein on the Today screen.', tanjurMissing: 'Tanjur isn\'t installed on this phone.', tanjurPhone: 'Opening Tanjur works in the Android app.',
@@ -76,6 +82,12 @@
     saveFail: 'Couldn\'t save to the phone\'s storage. Export a backup from Profile to be safe.', switched: 'Switched to {name}'
   };
   const hr = {
+    noMealsToday: 'Danas u Tanjuru još ništa nije upisano.', protein: 'Proteini', energy: 'Energija',
+    tanjurNotYet: 'Još ne mogu pročitati Tanjur. Ažuriraj Tanjur na najnoviju verziju i otvori ga jednom; nakon toga PoKreni sam čita tvoju težinu i obroke.', tanjurRefused: 'Tanjur je odbio vezu. Ponovno instaliraj obje aplikacije s GitHuba da si vjeruju.',
+    removeSet: 'Serija', untickFirst: 'Sve serije su označene. Prvo odznači jednu da je ukloniš.', linked: 'Povezano', notLinked: 'Nije povezano',
+    tanjurLinkedAbout: 'PoKreni čita tvoju težinu, ciljeve i današnje obroke izravno iz Tanjura (zadnje ažuriranje {time}), a Tanjur čita tvoje treninge iz PoKrenija. Za to ne treba Health Connect.',
+    refresh: 'Osvježi', weightFromTanjur: 'Iz Tanjura, {date}', weightFromHcShort: 'Iz Health Connecta, {date}', weightManual: 'Tanjur i Health Connect još nemaju tvoju težinu, pa je upiši ovdje. Koristi se samo za procjenu kalorija.',
+    oops: 'Ovdje je nešto pošlo po zlu', reload: 'Učitaj ponovno',
     dow0: 'Nedjelja', dow1: 'Ponedjeljak', dow2: 'Utorak', dow3: 'Srijeda', dow4: 'Četvrtak', dow5: 'Petak', dow6: 'Subota',
     dowS0: 'Ne', dowS1: 'Po', dowS2: 'Ut', dowS3: 'Sr', dowS4: 'Če', dowS5: 'Pe', dowS6: 'Su',
     mon0: 'sij', mon1: 'velj', mon2: 'ožu', mon3: 'tra', mon4: 'svi', mon5: 'lip', mon6: 'srp', mon7: 'kol', mon8: 'ruj', mon9: 'lis', mon10: 'stu', mon11: 'pro',
@@ -91,7 +103,7 @@
     sessionN: '{n}. trening', aboutMin: '~{m} min', optional: 'po želji', startSession: 'Započni trening',
     thisWeek: 'Ovaj tjedan', logCardio: 'Upiši šetnju ili vožnju', strengthDays: 'Dani snage', activeMinutes: 'Aktivne minute', weekEmpty: 'Ovaj tjedan još ništa nije upisano.', fromWatch: 'Sa sata ili mobitela',
     nextLesson: 'Sljedeća lekcija', lessonN: 'Lekcija {n}',
-    fuel: 'Prehrana', proteinToday: 'proteina danas', fuelNoData: 'Danas još ništa iz Tanjura.', fuelConnect: 'Poveži Health Connect u Profilu da vidiš današnje proteine iz Tanjura.', logMeal: 'Upiši obrok', openTanjur: 'Otvori Tanjur',
+    fuel: 'Prehrana', proteinToday: 'proteina danas', fuelNoData: 'Danas još ništa iz Tanjura.', logMeal: 'Upiši obrok', openTanjur: 'Otvori Tanjur',
     retestDue: 'Vrijeme za ponovno mjerenje', retestDueBody: 'Prošlo je {d} dana od zadnjih mjerenja. Ponovi ih da vidiš napredak.', retestBtn: 'Ponovi mjerenja', baselineBtn: 'Upiši početna mjerenja', retestNext: 'Sljedeće mjerenje od {date}.',
     lessonsDone: 'Završeno lekcija: {n} od {total}', redFlags: 'Kad stati', redFlagsShort: 'Bol u prsima, nesvjestica, oštra bol u zglobu: što napraviti, na jednom mjestu.', redFlagsSub: 'Semafor boli i hitni slučajevi',
     library: 'Knjižnica vježbi', libraryBody: 'Sve vježbe u PoKreniju, sa slikama i uputama.',
@@ -116,7 +128,7 @@
     weekPlan: 'Tjedni plan', gymDays: 'Dani za teretanu', homeDays: 'Šetnja ili vožnja kod kuće', weekPlanNote: 'Treninzi idu redom A, B, A, B, pa pomaknut dan nikad ne ruši plan.', planSave: 'Spremi tjedni plan', planSaved: 'Tjedni plan spremljen', pickGymDay: 'Odaberi barem jedan dan za teretanu.', planGo: 'Postavi u Profilu',
     training: 'Trening', restDefault: 'Zadani odmor između serija', restNote: 'Svaka vježba ima svoj odmor; ovaj se koristi kad ga nema.', soundOn: 'Zvučni signal kad odmor završi', remindOn: 'Podsjeti me na dane za teretanu', remindTime: 'Vrijeme podsjetnika',
     programNow: 'Program: {name}, odrađeno treninga: {n}.', backToFoundations: 'Natrag na Temelje',
-    on: 'Uključeno', off: 'Isključeno', hcWeb: 'Health Connect radi u Android aplikaciji.', hcAbout: 'Dijeli treninge s Tanjurom i Samsung Healthom, a preuzmi težinu, san, korake, treninge sa sata i proteine iz Tanjura.', hcConnect: 'Poveži Health Connect',
+    on: 'Uključeno', off: 'Isključeno', hcWeb: 'Health Connect radi u Android aplikaciji.', hcAbout: 'Po želji. Tanjur već izravno dobiva tvoje treninge. Health Connect ih dodaje u Samsung Health i donosi san, korake i treninge sa sata.', hcConnect: 'Poveži Health Connect',
     hcOnAbout: 'Treninzi se dijele kad ih završiš; težina, san, proteini i ostali treninzi sinkroniziraju se kad otvoriš PoKreni.', lastSync: 'Zadnja sinkronizacija {date}, {time}.', hcMissing: 'Dio pristupa je isključen pa se neki podaci neće sinkronizirati.', syncNow: 'Sinkroniziraj', syncing: 'Sinkroniziram…', manageAccess: 'Upravljaj pristupom', hcAskAgain: 'Ponovno zatraži pristup', hcStop: 'Prekini sinkronizaciju',
     hcUnavailable: 'Health Connect nije dostupan na ovom mobitelu.', hcDenied: 'Pristup nije odobren pa se ništa ne može sinkronizirati.', hcFailed: 'Ne mogu doći do Health Connecta.', hcStopped: 'Sinkronizacija prekinuta. Pristup potpuno ukloni pod Upravljaj pristupom.', synced: 'Sinkronizirano',
     tanjurAbout: 'Tanjur automatski dodaje tvoje PoKreni treninge u kalorijski budžet preko Health Connecta, a PoKreni na ekranu Danas pokazuje proteine iz Tanjura.', tanjurMissing: 'Tanjur nije instaliran na ovom mobitelu.', tanjurPhone: 'Otvaranje Tanjura radi u Android aplikaciji.',
