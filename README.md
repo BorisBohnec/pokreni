@@ -11,7 +11,7 @@ English and Croatian; switch in Profile or with the EN/HR button at the top.
 | `www/` | The whole app: `index.html`, `styles.css`, `app.js` (plain JS, no build step), bundled fonts |
 | `www/logic.js` | Training logic with no UI: readiness check, double progression, pain rules, weekly totals, lesson checks |
 | `www/i18n.js` | Interface text in English and Croatian |
-| `www/data/exercises.js` | 40 exercises with cues, common mistakes, easier and harder versions, in both languages |
+| `www/data/exercises.js` | 39 exercises with cues, common mistakes, easier and harder versions, in both languages |
 | `www/data/programs.js` | Foundations (weeks 1–4) and Build (weeks 5–12): full-body A/B sessions |
 | `www/data/lessons.js` | The 19 lessons, in both languages |
 | `www/img/ex/` | Exercise pictures from [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (public domain), resized |
