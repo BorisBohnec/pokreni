@@ -1,0 +1,82 @@
+name: Build PoKreni APK
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.POKRENI_KEYSTORE_B64 != '' && secrets.POKRENI_KEYSTORE_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Logic tests
+        run: npm test
+
+      - name: Copy the web app into the Android project
+        run: npx cap sync android
+
+      # The signing key lives only in the repo's Actions secrets, never in the code.
+      - name: Restore signing key
+        if: env.HAS_KEY == 'true'
+        working-directory: android/app
+        env:
+          KEY_B64: ${{ secrets.POKRENI_KEYSTORE_B64 }}
+          KEY_PW: ${{ secrets.POKRENI_KEYSTORE_PASSWORD }}
+        run: |
+          echo "$KEY_B64" | base64 -d > pokreni-release.jks
+          printf 'storeFile=pokreni-release.jks\nstorePassword=%s\nkeyAlias=pokreni\nkeyPassword=%s\n' "$KEY_PW" "$KEY_PW" > signing.properties
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          cp "$APK" ../pokreni.apk
+
+      - name: Keep the APK with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: pokreni-apk
+          path: pokreni.apk
+          retention-days: 14
+
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' && env.HAS_KEY == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: PoKreni 1.0.${{ github.run_number }}
+          make_latest: true
+          body: |
+            Download **pokreni.apk** on your phone and open it to install or update.
+            Updates install over the old version and keep your data.
+          files: pokreni.apk
+
+      - name: Signing key missing
+        if: env.HAS_KEY != 'true'
+        run: echo "::warning::No signing key in the repo secrets yet, so this APK is unsigned and no release was published. Add POKRENI_KEYSTORE_B64 and POKRENI_KEYSTORE_PASSWORD under Settings > Secrets and variables > Actions."

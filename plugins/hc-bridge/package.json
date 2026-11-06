@@ -1,0 +1,15 @@
+{
+  "name": "capacitor-hc-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Small Health Connect add-on shared by PoKreni and Tanjur: writes exercise sessions, nutrition and weight with stable IDs, reads nutrition totals and session titles, opens the other app.",
+  "main": "index.js",
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  }
+}
