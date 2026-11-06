@@ -1,7 +1,7 @@
 /* PoKreni: learn to train safely and log gym sessions. Plain JS, no build step. Pairs with Tanjur through Health Connect. */
 (function () {
 'use strict';
-const PK = window.PK, EX = window.PK_EXERCISES, PR = window.PK_PROGRAMS, LS = window.PK_LESSONS, I18N = window.PK_I18N;
+const PK = window.PK, EX = window.PK_EXERCISES, PR = window.PK_PROGRAMS, LS = window.PK_LESSONS, I18N = window.PK_I18N, AIX = window.PK_AI, COACH = window.PK_COACH;
 const { dkey, addDays, parseKey, weekStart, clamp, num, daysBetween } = PK;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -49,6 +49,7 @@ const ICONS = {
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>',
   plate: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/>',
+  chat: '<path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 17H10l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M8 10h8M8 13h5"/>',
   trash: '<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>',
   left: '<path d="M14.5 5.5L8 12l6.5 6.5"/>',
   right: '<path d="M9.5 5.5L16 12l-6.5 6.5"/>',
@@ -71,7 +72,7 @@ const Native = (() => {
     try { return typeof C.registerPlugin === 'function' ? C.registerPlugin(name) : (C.Plugins && C.Plugins[name]) || null; }
     catch (e) { return (C.Plugins && C.Plugins[name]) || null; }
   };
-  return { native, Filesystem: get('Filesystem'), Notif: get('LocalNotifications'), Health: get('Health'), Bridge: get('HcBridge'), App: get('App'), Awake: get('KeepAwake'), Haptics: get('Haptics'), Share: get('Share') };
+  return { native, Filesystem: get('Filesystem'), Notif: get('LocalNotifications'), Health: get('Health'), Bridge: get('HcBridge'), App: get('App'), Awake: get('KeepAwake'), Haptics: get('Haptics'), Share: get('Share'), Http: get('CapacitorHttp') };
 })();
 
 /* Without @capacitor/core bundled, a native plugin's addListener() returns a plain { remove } object, not a Promise.
@@ -91,10 +92,11 @@ const S = {
   program: { id: 'foundations', next: 0 }, lifts: {}, sessions: [], cardio: [], active: null,
   settings: { health: { on: false }, remind: { on: false, time: '16:30' } },
   hc: { weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, syncedAt: 0, granted: [] },
-  tanjur: null,
+  tanjur: null, coach: { msgs: [] }, aiUsage: null,
   savedAt: 0
 };
-const U = { tab: 'today', rest: null, tick: 0, sheets: [], hcBusy: false, tanjur: null, tjState: '', tjAt: 0, gradDismissed: false };
+const U = { tab: 'today', rest: null, tick: 0, sheets: [], hcBusy: false, tanjur: null, tjState: '', tjAt: 0, gradDismissed: false,
+  ai: null, tjUsage: null, coachBusy: null, coachDraft: '', coachLang: '' };
 
 function applyData(d) {
   if (!d || typeof d !== 'object') return;
@@ -111,12 +113,15 @@ function applyData(d) {
   S.settings = Object.assign({ health: { on: false }, remind: { on: false, time: '16:30' } }, d.settings || {});
   S.hc = Object.assign({ weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, syncedAt: 0, granted: [] }, d.hc || {});
   S.tanjur = d.tanjur && d.tanjur.app === 'tanjur' ? d.tanjur : null;
+  if (S.tanjur) delete S.tanjur.ai;
+  S.coach = d.coach && Array.isArray(d.coach.msgs) ? { msgs: d.coach.msgs.slice(-40) } : { msgs: [] };
+  S.aiUsage = d.aiUsage && d.aiUsage.month ? d.aiUsage : null;
   S.savedAt = d.savedAt || 0;
 }
 function snapshot() {
   S.savedAt = Date.now();
   return JSON.stringify({ app: 'pokreni', version: 1, savedAt: S.savedAt, profile: S.profile, readiness: S.readiness, baselines: S.baselines, lessons: S.lessons, quiz: S.quiz,
-    program: S.program, lifts: S.lifts, sessions: S.sessions, cardio: S.cardio, active: S.active, settings: S.settings, hc: S.hc, tanjur: S.tanjur });
+    program: S.program, lifts: S.lifts, sessions: S.sessions, cardio: S.cardio, active: S.active, settings: S.settings, hc: S.hc, tanjur: S.tanjur, coach: S.coach, aiUsage: S.aiUsage });
 }
 let saveTimer = 0, saveChain = Promise.resolve(), dirty = false, warned = false;
 function persist() { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flushSave, 300); }
@@ -139,7 +144,10 @@ function shareJSON() {
   const from = addDays(today(), -14), w = [];
   S.sessions.filter(s => s.date >= from).forEach(s => w.push({ id: s.id, kind: 'session', title: tx(s.name), date: s.date, start: s.start, minutes: PK.sessionMinutes(s), kcal: s.kcal || 0, type: 'strength' }));
   S.cardio.filter(c => c.date >= from).forEach(c => w.push({ id: 'c-' + c.id, kind: 'cardio', title: exName(c.type), date: c.date, start: c.start, minutes: c.minutes, kcal: c.kcal || 0, type: (EX.byId[c.type] || {}).hc || 'other' }));
-  return JSON.stringify({ app: 'pokreni', v: 1, at: new Date().toISOString(), workouts: w });
+  const tpl = nextTemplate(), p = program();
+  return JSON.stringify({ app: 'pokreni', v: 1, at: new Date().toISOString(), workouts: w,
+    plan: { gymDays: S.profile.gymDays || [], homeDays: S.profile.homeDays || [], program: p.name.en, next: tpl.name.en, done: doneInProgram() },
+    aiUsage: monthUsage(S.aiUsage) });
 }
 function writeShare() {
   if (!Native.Filesystem) return Promise.resolve();
@@ -220,7 +228,7 @@ function renderAll() {
   document.documentElement.lang = LANG;
   paintChrome();
   $$('.view').forEach(v => { v.hidden = v.id !== 'view-' + U.tab; });
-  const views = { today: renderToday, learn: renderLearn, train: renderTrain, progress: renderProgress, profile: renderProfile };
+  const views = { today: renderToday, learn: renderLearn, train: renderTrain, progress: renderProgress, profile: renderProfile, coach: renderCoach };
   safely(views[U.tab], '#view-' + U.tab);
   safely(renderRestBar);
   if (U.sheets.length) safely(renderSheet, '#sheetBody');
@@ -265,6 +273,7 @@ function renderToday() {
   const nl = nextLesson();
   if (nl) html += `<section class="card lesson-next" data-act="lesson" data-id="${nl.id}" role="button" tabindex="0"><div class="eyebrow">${esc(t('nextLesson'))} · ${esc(tx(LS.PHASES[nl.phase].name))}</div>
     <h2>${esc(t('lessonN', { n: +nl.id.slice(1) }))}: ${esc(tx(nl.title))}</h2><p class="muted">${esc(tx(nl.task))}</p></section>`;
+  html += `<section class="card coach-card" data-act="coach" role="button" tabindex="0"><div class="coach-card-in">${icon('chat')}<div><h2>${esc(t('coachTitle'))}</h2><p class="muted small">${esc(t('coachCardBody'))}</p></div>${icon('right', 'chev')}</div></section>`;
   html += foodCard(k);
   const rt = PK.retestStatus(S.baselines, k);
   if (canGym() && rt.code === 'due') html += `<section class="card"><h2>${esc(t('retestDue'))}</h2><p class="muted">${esc(t('retestDueBody', { d: rt.days }))}</p><button class="btn" data-act="baseline">${esc(t('retestBtn'))}</button></section>`;
@@ -330,7 +339,8 @@ function renderLearn() {
   const el = $('#view-learn');
   const done = LS.list.filter(l => lessonDone(l.id)).length;
   let html = `<header class="view-head"><div><div class="eyebrow">${esc(t('lessonsDone', { n: done, total: LS.list.length }))}</div><h1>${esc(t('tabLearn'))}</h1></div></header>
-    <section class="card flags" data-act="redflags" role="button" tabindex="0"><h2>${icon('flag')}${esc(t('redFlags'))}</h2><p>${esc(t('redFlagsShort'))}</p></section>`;
+    <section class="card flags" data-act="redflags" role="button" tabindex="0"><h2>${icon('flag')}${esc(t('redFlags'))}</h2><p>${esc(t('redFlagsShort'))}</p></section>
+    <section class="card coach-card" data-act="coach" role="button" tabindex="0"><div class="coach-card-in">${icon('chat')}<div><h2>${esc(t('coachTitle'))}</h2><p class="muted small">${esc(t('coachCardBody'))}</p></div>${icon('right', 'chev')}</div></section>`;
   LS.PHASES.forEach(ph => {
     const ls = LS.list.filter(l => l.phase === ph.n);
     html += `<section class="card phase"><div class="card-head"><h2>${esc(tx(ph.name))}</h2><span class="muted small">${esc(tx(ph.when))}</span></div><ol class="lessons">
@@ -393,7 +403,8 @@ function trainItem(it, i) {
   const swap = (ex.alts || []).length ? `<button class="btn small ghost" data-act="swap" data-i="${i}">${icon('swap')}${esc(t('swap'))}</button>` : '';
   const pain = done && !item.mins ? `<div class="pain"><span>${esc(t('howFelt'))}</span><div class="seg small">
       ${[[2, 'painFine'], [5, 'painMeh'], [7, 'painSharp']].map(([v, k]) => `<button data-act="pain" data-i="${i}" data-v="${v}" aria-pressed="${it.pain === v}">${esc(t(k))}</button>`).join('')}</div>
-      ${it.pain >= 6 ? `<p class="banner crit">${icon('alert')}${esc(t('painRedAdvice'))}</p>` : it.pain >= 4 ? `<p class="banner warn">${icon('info')}${esc(t('painYellowAdvice'))}</p>` : ''}</div>` : '';
+      ${it.pain >= 6 ? `<p class="banner crit">${icon('alert')}${esc(t('painRedAdvice'))}</p>` : it.pain >= 4 ? `<p class="banner warn">${icon('info')}${esc(t('painYellowAdvice'))}</p>` : ''}
+      ${it.pain >= 4 ? `<button class="btn small ghost" data-act="coach" data-q="${esc(t(it.pain >= 6 ? 'painAskRed' : 'painAskYellow', { name: tx(ex.name) }))}">${icon('chat')}${esc(t('askCoach'))}</button>` : ''}</div>` : '';
   return `<section class="card ti open ${complete ? 'complete' : ''}">${head}
     ${ex.note ? `<p class="banner info">${icon('info')}${esc(tx(ex.note))}</p>` : ''}
     ${firstTime ? `<p class="hint">${esc(t('firstLoadHint'))}</p>` : ''}
@@ -644,6 +655,7 @@ function renderProfile() {
       <label class="field"><span>${esc(t('name'))}</span><input id="pf-name" value="${esc(P.name)}" placeholder="${esc(displayName())}" autocomplete="given-name"></label>
       <label class="field"><span>${esc(t('language'))}</span><select id="pf-lang"><option value="en" ${LANG === 'en' ? 'selected' : ''}>English</option><option value="hr" ${LANG === 'hr' ? 'selected' : ''}>Hrvatski</option></select></label>
       ${weightField()}
+      <label class="field"><span>${esc(t('notesLabel'))}</span><textarea id="pf-notes" rows="3" maxlength="600" placeholder="${esc(t('notesPlaceholder'))}">${esc(P.notes || '')}</textarea><small class="muted">${esc(t('notesNote'))}</small></label>
     </section>
     <section class="card"><div class="card-head"><h2>${esc(t('readinessTitle'))}</h2>${chip(rState[0], rState[1])}</div>
       <p class="muted small">${esc(S.readiness && S.readiness.answeredAt ? t('answeredOn', { date: fullDate(S.readiness.answeredAt) }) : t('readinessWhy'))}</p>
@@ -664,11 +676,12 @@ function renderProfile() {
       ${hcBody()}</section>
     <section class="card"><div class="card-head"><h2>Tanjur</h2>${S.tanjur ? chip('good', t('linked')) : chip('warn', t('notLinked'))}</div>
       <p class="muted small">${esc(S.tanjur ? t('tanjurLinkedAbout', { time: S.tanjur.at ? shortDate(dkey(new Date(S.tanjur.at))) + ', ' + clock(new Date(S.tanjur.at)) : '' }) : U.tanjur === false ? t('tanjurMissing') : U.tjState === 'refused' ? t('tanjurRefused') : t('tanjurNotYet'))}</p>
+      <p class="muted small">${esc(AIC.available() ? t('aiKeysShared', { spent: (monthUsage(S.aiUsage).cost).toFixed(3), cap: AIC.cap() ? '$' + AIC.cap() : t('noLimit') }) : t('aiKeysNotShared'))}</p>
       <div class="row2"><button class="btn" data-act="tanjur" data-path="today">${esc(t('openTanjur'))}</button><button class="btn ghost" data-act="tj-refresh">${icon('sync')}${esc(t('refresh'))}</button></div></section>
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.1 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.2 · ${esc(t('aboutLine'))}</p>`;
 }
 function weightField() {
   const w = weightSource();
@@ -736,6 +749,7 @@ const SHEETS = {
       <h3>${esc(t('howTo'))}</h3><ol class="cues">${tx(ex.cues).map(c => `<li>${esc(c)}</li>`).join('')}</ol>
       ${tx(ex.mistakes).length ? `<h3>${esc(t('commonMistakes'))}</h3><ul class="cues warn">${tx(ex.mistakes).map(c => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
       ${rel ? `<div class="chips wrap">${rel}</div>` : ''}
+      <button class="btn small ghost" data-act="coach" data-q="${esc(tx(ex.name))}: ">${icon('chat')}${esc(t('askAboutThis'))}</button>
       ${lift && (lift.kg != null || lift.reps || lift.secs) ? `<h3>${esc(t('nextTime'))}</h3><p>${lift.kg != null ? n1(lift.kg) + ' kg' : ''}${lift.reps ? ' × ' + lift.reps : ''}${lift.secs ? ' · ' + lift.secs + ' s' : ''}</p>` : ''}
       ${hist.length ? `<h3>${esc(t('recent'))}</h3><ul class="mini-hist">${hist.map(h => `<li><span>${esc(shortDate(h.date))}</span><span>${h.kg ? n1(h.kg) + ' kg × ' : ''}${h.reps || (h.secs ? h.secs + ' s' : '')}</span></li>`).join('')}</ul>` : ''}` };
   },
@@ -922,6 +936,100 @@ async function writeCardioHC(c) {
 }
 async function deleteHC(ids) { if (!hcWriteOk() || !ids.length) return; try { await Native.Bridge.deleteExercise({ ids }); } catch (e) { /* ignore */ } }
 
+/* ---------- coach (AI) ---------- */
+const monthKey = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+const monthUsage = u => (u && u.month === monthKey() ? u : { month: monthKey(), cost: 0, n: 0 });
+/* Claude's monthly limit is shared: PoKreni's own spend plus Tanjur's. */
+const AIC = AIX.createAI({
+  keys: () => U.ai,
+  spent: () => monthUsage(S.aiUsage).cost + monthUsage(U.tjUsage).cost,
+  record: u => { const m = monthUsage(S.aiUsage); S.aiUsage = { month: m.month, cost: Math.round((m.cost + u.cost) * 1e5) / 1e5, n: (m.n || 0) + 1 }; persist(); },
+  http: Native.Http
+});
+function aiErr(e) {
+  const tried = e && e.tried && e.tried.length ? ' ' + t('aiTried', { list: e.tried.join('; ') }) : '';
+  switch (e && e.code) {
+    case 'no_key': return t('coachNoKeys');
+    case 'bad_key': case 'groq_key': return t('aiBadKey') + tried;
+    case 'claude_key': return t('aiClaudeKey') + tried;
+    case 'claude_credits': return t('aiClaudeCredits') + tried;
+    case 'rate_limited': return t('aiRate') + tried;
+    case 'timeout': return t('aiTimeout');
+    case 'network': return t('aiNetwork');
+    default: return t('aiFail') + tried;
+  }
+}
+function openCoach(prefill) {
+  closeAllSheets();
+  if (prefill) U.coachDraft = prefill;
+  setTab('coach');
+  setTimeout(() => { const i = $('#coachInput'); if (i && prefill) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 80);
+}
+const COACH_CHIPS = ['qProgress', 'qBack', 'qPreGym', 'qSore', 'qCold', 'qShort'];
+function renderCoach() {
+  const el = $('#view-coach');
+  const src = AIC.source();
+  const chipS = src === 'claude' ? chip('good', 'Claude') : src === 'free' ? chip('info', t('freeModels')) : src === 'capped' ? chip('warn', t('claudeCapped')) : chip('warn', t('off'));
+  /* The composer is built once per language so typing is never interrupted by a background refresh. */
+  if (!$('#coachInput') || U.coachLang !== LANG) {
+    U.coachLang = LANG;
+    el.innerHTML = `<header class="view-head"><div><div class="eyebrow">${esc(t('coachEyebrow'))}</div><h1>${esc(t('coachTitle'))}</h1></div><span id="coachSrc"></span></header>
+      <div id="coachSetup"></div>
+      <div class="chat" id="coachMsgs" aria-live="polite"></div>
+      <div class="composer">
+        <textarea id="coachInput" rows="2" maxlength="1500" placeholder="${esc(t('coachPlaceholder'))}">${esc(U.coachDraft)}</textarea>
+        <button class="btn primary send" data-act="coach-send" id="coachSend" aria-label="${esc(t('send'))}">${icon('go')}</button>
+      </div>
+      <p class="muted small coach-note">${esc(t('coachPrivacy'))}</p>`;
+  }
+  $('#coachSrc').innerHTML = chipS;
+  $('#coachSetup').innerHTML = AIC.available() ? '' : `<section class="card callout warn"><h2>${esc(t('coachSetupTitle'))}</h2><p class="small">${esc(t(S.tanjur ? 'coachSetupBody' : 'coachSetupNoTanjur'))}</p>
+    <div class="row2"><button class="btn" data-act="tanjur" data-path="ai">${esc(t('openTanjur'))}</button><button class="btn ghost" data-act="tj-refresh">${icon('sync')}${esc(t('refresh'))}</button></div></section>`;
+  const msgs = S.coach.msgs;
+  let html = '';
+  if (!msgs.length) html += `<div class="coach-intro"><p>${esc(t('coachIntro'))}</p><div class="chips wrap">${COACH_CHIPS.map(k => `<button class="chip-btn" data-act="coach-ask" data-q="${esc(t(k))}">${esc(t(k))}</button>`).join('')}</div></div>`;
+  msgs.forEach(m => {
+    if (m.role === 'user') {
+      html += `<div class="msg user"><div class="bubble">${esc(m.text)}</div></div>`;
+      if (m.emergency) html += `<div class="flag-row emergency"><h3>${esc(t('emergency'))}</h3><p>${esc(t('emergencyBody'))}</p><a class="btn danger-solid block" href="tel:112">${esc(t('call112'))}</a></div>`;
+    } else if (m.role === 'coach') {
+      const r = COACH.renderAnswer(m.text, EX, LS);
+      const links = r.links.map(l => l.kind === 'lesson'
+        ? `<button class="chip-btn" data-act="lesson" data-id="${l.id}">${icon('book')}${esc(t('lessonN', { n: +l.id.slice(1) }))}: ${esc(tx(LS.byId[l.id].title))}</button>`
+        : `<button class="chip-btn" data-act="ex" data-id="${l.id}">${esc(exName(l.id))}</button>`).join('');
+      html += `<div class="msg coach"><div class="bubble">${r.html}${links ? `<div class="chips wrap">${links}</div>` : ''}${m.via ? `<div class="via">${esc(m.via)}</div>` : ''}</div></div>`;
+    } else html += `<div class="msg err"><div class="bubble">${icon('alert')}${esc(m.text)}</div></div>`;
+  });
+  if (U.coachBusy) html += `<div class="msg coach"><div class="bubble thinking"><span class="dots3"><i></i><i></i><i></i></span>${esc(t('thinking'))}<button class="btn small ghost" data-act="coach-stop">${esc(t('stop'))}</button></div></div>`;
+  if (msgs.length && !U.coachBusy) html += `<div class="chat-tools"><button class="btn small ghost" data-act="coach-clear">${icon('trash')}${esc(t('clearChat'))}</button></div>`;
+  $('#coachMsgs').innerHTML = html;
+  const send = $('#coachSend'); if (send) send.disabled = !!U.coachBusy;
+}
+function scrollCoachEnd() { requestAnimationFrame(() => { const c = $('#coachMsgs'); if (c && c.lastElementChild) c.lastElementChild.scrollIntoView({ block: 'end', behavior: 'smooth' }); }); }
+async function askCoach(q) {
+  q = String(q || '').trim(); if (!q || U.coachBusy) return;
+  const emergency = AIX.isEmergency(q);
+  const tpl = nextTemplate();
+  const { prompt } = COACH.buildPrompt(S, {
+    today: today(), appLang: LANG, question: q, EX, LS, PR, lessonDone, weight: weightSource(),
+    nextTemplate: canGym() ? { name: tpl.name, items: planFor(tpl, false).map(x => ({ ex: x.ex, text: targetText(x.ex, x.item, x.target) })) } : null
+  });
+  S.coach.msgs.push({ role: 'user', text: q, at: Date.now(), emergency });
+  U.coachDraft = ''; const inp = $('#coachInput'); if (inp) inp.value = '';
+  if (!AIC.available()) { S.coach.msgs.push({ role: 'err', text: t('coachNoKeys'), at: Date.now() }); persist(); renderCoach(); scrollCoachEnd(); return; }
+  const ctl = new AbortController(); U.coachBusy = { ctl };
+  persist(); renderCoach(); scrollCoachEnd();
+  try {
+    const r = await AIC.text(prompt, { signal: ctl.signal, maxTokens: 1200, temperature: 0.3 });
+    S.coach.msgs.push({ role: 'coach', text: r.text, at: Date.now(), via: r.via });
+    if (r.claudeErr === 'claude_key' || r.claudeErr === 'claude_credits') toast(t(r.claudeErr === 'claude_key' ? 'aiClaudeKey' : 'aiClaudeCredits'));
+  } catch (e) {
+    if (!e || e.code !== 'cancelled') S.coach.msgs.push({ role: 'err', text: aiErr(e), at: Date.now() });
+  }
+  U.coachBusy = null; S.coach.msgs = S.coach.msgs.slice(-40);
+  persist(); if (U.tab === 'coach') { renderCoach(); scrollCoachEnd(); }
+}
+
 /* ---------- Tanjur ---------- */
 /* Reads Tanjur's share.json (weight, targets, today's meals, last 14 days) straight from Tanjur through the
    bridge's ShareProvider. No Health Connect needed. Runs on start and whenever PoKreni comes back to the front. */
@@ -933,7 +1041,12 @@ async function readTanjur(force) {
     const r = await Native.Bridge.readShared({ pkg: PKG_TANJUR });
     if (r && r.found && r.json) {
       const d = JSON.parse(r.json);
-      if (d && d.app === 'tanjur') { S.tanjur = d; U.tjState = 'ok'; U.tanjur = true; persist(); scheduleRender(); return; }
+      if (d && d.app === 'tanjur') {
+        /* AI keys are kept in memory only: never in PoKreni's data file or backups. */
+        U.ai = d.ai && typeof d.ai === 'object' ? d.ai : null; delete d.ai;
+        U.tjUsage = d.aiUsage || null;
+        S.tanjur = d; U.tjState = 'ok'; U.tanjur = true; persist(); scheduleRender(); return;
+      }
     }
     U.tjState = (r && r.reason) || 'missing';
   } catch (e) { U.tjState = 'missing'; }
@@ -991,6 +1104,12 @@ function handleAct(act, b) {
   const id = b.dataset.id;
   switch (act) {
     case 'tab': setTab(b.dataset.tab); break;
+    case 'coach': openCoach(b.dataset.q || ''); break;
+    case 'coach-ask': askCoach(b.dataset.q); break;
+    case 'coach-send': { const i = $('#coachInput'); askCoach(i ? i.value : ''); break; }
+    case 'coach-stop': if (U.coachBusy) U.coachBusy.ctl.abort(); break;
+    case 'coach-clear': openSheet('confirm', { msg: t('clearChatConfirm'), yes: t('clearChat'), act: 'coach-clear-yes' }); break;
+    case 'coach-clear-yes': S.coach.msgs = []; persist(); closeAllSheets(); renderCoach(); break;
     case 'reload': location.reload(); break;
     case 'go': if (S.active) setTab('train'); else startSession(); break;
     case 'start': startSession(); break;
@@ -1082,6 +1201,7 @@ function bindEvents() {
   });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && U.sheets.length) closeSheet();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target && e.target.id === 'coachInput') { e.preventDefault(); askCoach(e.target.value); }
     if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.matches('[role="button"][data-act]')) { e.preventDefault(); handleAct(e.target.dataset.act, e.target); }
   });
   $('#view-train').addEventListener('input', onTrainInput);
@@ -1091,6 +1211,7 @@ function bindEvents() {
     if (el.dataset.lesson) { S.lessons[el.dataset.lesson] = { done: el.checked, at: today() }; persist(); renderSheet(); scheduleRender(); return; }
     switch (el.id) {
       case 'pf-name': S.profile.name = el.value.trim().slice(0, 40); persist(); break;
+      case 'pf-notes': S.profile.notes = el.value.trim().slice(0, 600); persist(); break;
       case 'pf-lang': setLang(el.value); break;
       case 'pf-kg': { const v = num(el.value); S.profile.kg = v && v > 30 && v < 350 ? v : null; persist(); break; }
       case 'pf-rest': S.profile.restSec = +el.value; persist(); break;
@@ -1104,6 +1225,7 @@ function bindEvents() {
   });
   document.addEventListener('input', e => {
     const el = e.target; if (!el) return;
+    if (el.id === 'coachInput') { U.coachDraft = el.value; return; }
     if (el.id === 'c-min') { readCardioDraft(); const k = $('#c-kcal'); if (k) k.textContent = t('kcalEst', { kcal: n0(cardioKcal(U.draftC)) }); }
     if (el.id === 'rBpS' || el.id === 'rBpD') { if (U.draftR) { U.draftR.bpSys = num($('#rBpS').value); U.draftR.bpDia = num($('#rBpD').value); } }
   });

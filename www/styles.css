@@ -304,6 +304,40 @@ a{color:var(--accent)}
 .sum-stats span{font-size:12.5px;color:var(--muted);margin-top:4px}
 .hist-ex h3{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 
+/* coach */
+.coach-card{cursor:pointer;background:linear-gradient(120deg,var(--accent-wash),var(--surface) 70%)}
+.coach-card-in{display:flex;align-items:center;gap:12px}
+.coach-card-in>.ic:first-child{width:30px;height:30px;color:var(--accent)}
+.coach-card-in>div{flex:1;min-width:0}
+.coach-card h2{margin:0 0 2px}
+.coach-card p{margin:0}
+.chat{display:flex;flex-direction:column;gap:10px}
+.coach-intro{background:var(--surface);border-radius:var(--r);padding:14px 16px;box-shadow:var(--shadow)}
+.coach-intro p{margin:0 0 6px;font-size:14px;color:var(--ink-2)}
+.msg{display:flex}
+.msg.user{justify-content:flex-end}
+.bubble{max-width:88%;padding:11px 14px;border-radius:18px;font-size:15px;line-height:1.5;background:var(--surface);box-shadow:var(--shadow);-webkit-user-select:text;user-select:text}
+.msg.user .bubble{background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:6px;white-space:pre-wrap}
+.msg.coach .bubble{border-bottom-left-radius:6px}
+.bubble p{margin:0 0 8px}.bubble p:last-child{margin-bottom:0}
+.bubble ul{margin:4px 0 8px;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.bubble .chips{margin:10px 0 0}
+.bubble .chip-btn .ic{width:15px;height:15px;vertical-align:-3px;margin-right:4px}
+.via{font-size:11.5px;color:var(--muted);margin-top:8px}
+.msg.err .bubble{background:var(--warn-bg);display:flex;gap:8px;align-items:flex-start;font-size:14px}
+.msg.err .ic{color:var(--warn);flex:none}
+.thinking{display:flex;align-items:center;gap:10px;color:var(--ink-2)}
+.dots3{display:inline-flex;gap:4px}
+.dots3 i{width:7px;height:7px;border-radius:50%;background:var(--accent);opacity:.3;animation:dot 1.2s infinite}
+.dots3 i:nth-child(2){animation-delay:.2s}.dots3 i:nth-child(3){animation-delay:.4s}
+@keyframes dot{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.chat-tools{display:flex;justify-content:center}
+.composer{position:sticky;bottom:calc(84px + var(--sab));z-index:5;display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:8px;box-shadow:var(--shadow);margin-top:6px}
+.composer textarea{flex:1;border:0;background:transparent;resize:none;font-size:16px;line-height:1.4;padding:6px 6px;max-height:140px;outline:none}
+.composer .send{min-height:44px;width:48px;padding:0;border-radius:13px}
+.coach-note{text-align:center;margin:4px 8px 0}
+.field textarea{border-radius:12px;border:1px solid var(--line);background:var(--bg);padding:10px 12px;font-size:15px;resize:vertical}
+
 /* tab bar */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(10px);border-top:1px solid var(--line);padding-bottom:var(--sab)}
 .tabbar-in{max-width:560px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr 1.15fr 1fr 1fr;align-items:end;height:68px;padding:0 6px}

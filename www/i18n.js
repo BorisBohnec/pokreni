@@ -4,6 +4,20 @@
   if (typeof module === 'object' && module.exports) module.exports = lib; else root.PK_I18N = lib;
 })(typeof self !== 'undefined' ? self : this, function () {
   const en = {
+    coachEyebrow: 'Training, soreness, food around workouts', coachTitle: 'Ask the coach', coachCardBody: 'Questions about your training, soreness or eating around the gym, answered from your own log.',
+    coachPlaceholder: 'Ask anything about your training…', send: 'Send', thinking: 'Thinking…', stop: 'Stop', clearChat: 'Clear chat', clearChatConfirm: 'Delete the whole conversation with the coach?',
+    coachIntro: 'The coach sees your sessions, weights, how sets felt, your week, lessons and Tanjur\'s food summary. It doesn\'t diagnose; for anything serious it sends you to a doctor or physio.',
+    coachPrivacy: 'Your question and a summary of your training and food go to the AI service (Claude, or the free models). General guidance, not medical advice.',
+    coachSetupTitle: 'Turn on the coach in Tanjur', coachSetupBody: 'The coach uses Tanjur\'s AI keys. In Tanjur open Profile → AI and switch on "Let PoKreni use these AI keys", then come back here and tap Refresh.',
+    coachSetupNoTanjur: 'The coach uses Tanjur\'s AI keys. Install or update Tanjur, add an AI key there under Profile → AI, switch on "Let PoKreni use these AI keys", then tap Refresh.',
+    coachNoKeys: 'No AI keys yet. Turn on "Let PoKreni use these AI keys" in Tanjur (Profile → AI).', freeModels: 'Free models', claudeCapped: 'Claude limit reached',
+    qProgress: 'Am I progressing as I should?', qBack: 'My lower back aches after standing still. What should I do in the gym?', qPreGym: 'What should I eat before the gym after work?',
+    qSore: 'Is the soreness I have normal?', qCold: 'Can I train with a cold?', qShort: 'I only have 20 minutes today. What should I do?',
+    askAboutThis: 'Ask the coach about this', askCoach: 'Ask the coach', painAskYellow: '{name} felt uncomfortable today. What should I change next time?', painAskRed: '{name} was painful today. What should I do?',
+    notesLabel: 'For the coach: your body and health', notesPlaceholder: 'e.g. back aches after standing, old knee injury, very flexible', notesNote: 'Only sent to the AI when you ask the coach a question.',
+    aiKeysShared: 'The coach uses Tanjur\'s AI keys. Claude this month in PoKreni: ${spent} (limit {cap}, shared with Tanjur).', aiKeysNotShared: 'The coach needs Tanjur\'s AI keys: in Tanjur, Profile → AI, switch on "Let PoKreni use these AI keys".', noLimit: 'none',
+    aiTried: 'Tried {list}.', aiBadKey: 'The free AI service rejected the key. Check it in Tanjur under Profile → AI.', aiClaudeKey: 'Claude rejected the API key, so a free model answered. Check it in Tanjur.', aiClaudeCredits: 'Your Claude credit ran out, so a free model answered. Top up at platform.claude.com.',
+    aiRate: 'The AI is busy or a daily limit was reached. Try again in a few minutes.', aiTimeout: 'The AI took too long. Try again in a minute.', aiNetwork: 'No connection to the AI. Check your internet and try again.', aiFail: 'The AI couldn\'t answer this time.',
     noMealsToday: 'Nothing logged in Tanjur today yet.', protein: 'Protein', energy: 'Energy',
     tanjurNotYet: 'Couldn\'t read Tanjur yet. Update Tanjur to the latest version and open it once; after that PoKreni reads your weight and meals by itself.', tanjurRefused: 'Tanjur refused the connection. Reinstall both apps from GitHub so they trust each other.',
     removeSet: 'Set', untickFirst: 'All sets are ticked. Untick one first to remove it.', linked: 'Linked', notLinked: 'Not linked',
@@ -82,6 +96,20 @@
     saveFail: 'Couldn\'t save to the phone\'s storage. Export a backup from Profile to be safe.', switched: 'Switched to {name}'
   };
   const hr = {
+    coachEyebrow: 'Trening, upala mišića, prehrana uz trening', coachTitle: 'Pitaj trenera', coachCardBody: 'Pitanja o treningu, upali mišića ili prehrani uz teretanu, s odgovorima iz tvog dnevnika.',
+    coachPlaceholder: 'Pitaj bilo što o svom treningu…', send: 'Pošalji', thinking: 'Razmišljam…', stop: 'Zaustavi', clearChat: 'Obriši razgovor', clearChatConfirm: 'Obrisati cijeli razgovor s trenerom?',
+    coachIntro: 'Trener vidi tvoje treninge, težine, kako su serije prošle, tvoj tjedan, lekcije i sažetak prehrane iz Tanjura. Ne postavlja dijagnoze; za sve ozbiljno te upućuje liječniku ili fizioterapeutu.',
+    coachPrivacy: 'Tvoje pitanje i sažetak treninga i prehrane šalju se AI usluzi (Claude ili besplatni modeli). Opće smjernice, ne liječnički savjet.',
+    coachSetupTitle: 'Uključi trenera u Tanjuru', coachSetupBody: 'Trener koristi AI ključeve iz Tanjura. U Tanjuru otvori Profil → AI i uključi "Dopusti PoKreniju da koristi ove AI ključeve", pa se vrati ovdje i dodirni Osvježi.',
+    coachSetupNoTanjur: 'Trener koristi AI ključeve iz Tanjura. Instaliraj ili ažuriraj Tanjur, ondje dodaj AI ključ pod Profil → AI, uključi "Dopusti PoKreniju da koristi ove AI ključeve", pa dodirni Osvježi.',
+    coachNoKeys: 'Još nema AI ključeva. U Tanjuru uključi "Dopusti PoKreniju da koristi ove AI ključeve" (Profil → AI).', freeModels: 'Besplatni modeli', claudeCapped: 'Claude limit dosegnut',
+    qProgress: 'Napredujem li kako treba?', qBack: 'Bole me donja leđa nakon dugog stajanja. Što da radim u teretani?', qPreGym: 'Što da pojedem prije teretane nakon posla?',
+    qSore: 'Je li ova upala mišića normalna?', qCold: 'Smijem li trenirati s prehladom?', qShort: 'Danas imam samo 20 minuta. Što da odradim?',
+    askAboutThis: 'Pitaj trenera o ovome', askCoach: 'Pitaj trenera', painAskYellow: '{name} je danas bilo neugodno. Što da promijenim sljedeći put?', painAskRed: '{name} je danas boljelo. Što da radim?',
+    notesLabel: 'Za trenera: tvoje tijelo i zdravlje', notesPlaceholder: 'npr. leđa bole nakon stajanja, stara ozljeda koljena, vrlo fleksibilan', notesNote: 'Šalje se AI-ju samo kad trenera nešto pitaš.',
+    aiKeysShared: 'Trener koristi AI ključeve iz Tanjura. Claude ovaj mjesec u PoKreniju: ${spent} (limit {cap}, zajednički s Tanjurom).', aiKeysNotShared: 'Treneru trebaju AI ključevi iz Tanjura: u Tanjuru, Profil → AI, uključi "Dopusti PoKreniju da koristi ove AI ključeve".', noLimit: 'bez limita',
+    aiTried: 'Pokušano: {list}.', aiBadKey: 'Besplatna AI usluga je odbila ključ. Provjeri ga u Tanjuru pod Profil → AI.', aiClaudeKey: 'Claude je odbio API ključ pa je odgovorio besplatni model. Provjeri ključ u Tanjuru.', aiClaudeCredits: 'Potrošio si Claude kredit pa je odgovorio besplatni model. Nadoplati na platform.claude.com.',
+    aiRate: 'AI je zauzet ili je dosegnut dnevni limit. Pokušaj za nekoliko minuta.', aiTimeout: 'AI je predugo odgovarao. Pokušaj za minutu.', aiNetwork: 'Nema veze s AI-jem. Provjeri internet i pokušaj ponovno.', aiFail: 'AI ovaj put nije mogao odgovoriti.',
     noMealsToday: 'Danas u Tanjuru još ništa nije upisano.', protein: 'Proteini', energy: 'Energija',
     tanjurNotYet: 'Još ne mogu pročitati Tanjur. Ažuriraj Tanjur na najnoviju verziju i otvori ga jednom; nakon toga PoKreni sam čita tvoju težinu i obroke.', tanjurRefused: 'Tanjur je odbio vezu. Ponovno instaliraj obje aplikacije s GitHuba da si vjeruju.',
     removeSet: 'Serija', untickFirst: 'Sve serije su označene. Prvo odznači jednu da je ukloniš.', linked: 'Povezano', notLinked: 'Nije povezano',
