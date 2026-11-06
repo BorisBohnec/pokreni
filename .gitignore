@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+*.log
+*.jks
+*.keystore
+android/app/signing.properties
