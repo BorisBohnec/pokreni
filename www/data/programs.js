@@ -6,10 +6,10 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   const WARMUP = [
     { id: 'w-bike', en: '5 min easy bike or treadmill walk', hr: '5 min laganog bicikla ili hodanja na traci' },
-    { id: 'w-squat', en: '8 squats to a box', hr: '8 čučnjeva na klupu' },
-    { id: 'w-hinge', en: '8 hip hinges with hands on hips', hr: '8 pregiba u kukovima s rukama na bokovima' },
-    { id: 'w-push', en: '8 incline push-ups on a bench or bar', hr: '8 sklekova s rukama na klupi ili šipki' },
-    { id: 'w-bridge', en: '10 glute bridges', hr: '10 mostova za gluteuse' },
+    { id: 'w-squat', areas: ['knee', 'hip'], en: '8 squats to a box', hr: '8 čučnjeva na klupu' },
+    { id: 'w-hinge', areas: ['lower_back', 'hip'], en: '8 hip hinges with hands on hips', hr: '8 pregiba u kukovima s rukama na bokovima' },
+    { id: 'w-push', areas: ['wrist', 'shoulders', 'elbow'], en: '8 incline push-ups on a bench or bar', hr: '8 sklekova s rukama na klupi ili šipki' },
+    { id: 'w-bridge', areas: ['hip'], en: '10 glute bridges', hr: '10 mostova za gluteuse' },
     { id: 'w-ramp', en: 'First exercise: 1–2 light sets before the work sets', hr: 'Prva vježba: 1–2 lagane serije prije radnih' }
   ];
   const FINISHER = { ex: 'bike_stationary', mins: 10, finisher: 1 };

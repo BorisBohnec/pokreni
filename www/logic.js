@@ -189,7 +189,222 @@
     return out;
   }
 
+  /* ---------- body map ---------- */
+  /* Sets per muscle from finished sessions dated from..to (inclusive). A set counts 1 for a main muscle and 0.5
+     for a supporting one. B = PK_BODY. Cardio and finishers don't count. */
+  function muscleSets(sessions, B, from, to) {
+    const out = {}; B.muscleIds.forEach(m => { out[m] = 0; });
+    (sessions || []).forEach(s => {
+      if (!s || !s.end || s.date < from || s.date > to) return;
+      (s.items || []).forEach(it => {
+        if (!it || it.mins) return;
+        const tag = B.EXM[it.ex]; if (!tag) return;
+        const n = (it.sets || []).filter(x => x && x.done).length; if (!n) return;
+        tag.p.forEach(m => { out[m] += n; }); tag.s.forEach(m => { out[m] += n / 2; });
+      });
+    });
+    return out;
+  }
+  /* Colour level 0–5 from sets per week. */
+  function muscleLevel(perWeek) { const v = +perWeek || 0; return v <= 0 ? 0 : v <= 2 ? 1 : v <= 4 ? 2 : v <= 6 ? 3 : v <= 9 ? 4 : 5; }
+
+  /* Ranks reward steady weeks, not piles of sets: a week counts when a muscle gets RANK_SETS or more. */
+  const RANKS = [{ id: 'start', weeks: 1 }, { id: 'bronze', weeks: 2 }, { id: 'silver', weeks: 4 }, { id: 'gold', weeks: 8 }, { id: 'diamond', weeks: 16 }];
+  const RANK_SETS = 3;
+  function rankFor(weeks) { let r = null; RANKS.forEach(x => { if (weeks >= x.weeks) r = x.id; }); return r; }
+  function muscleRanks(sessions, B, today) {
+    const fin = (sessions || []).filter(s => s && s.end && isKey(s.date));
+    const thisWeek = weekStart(today);
+    const out = {};
+    const firstWeek = fin.length ? weekStart(fin.reduce((a, s) => (s.date < a ? s.date : a), fin[0].date)) : thisWeek;
+    const n = Math.max(1, Math.round(daysBetween(firstWeek, thisWeek) / 7) + 1);
+    const weeks = [];
+    for (let i = 0; i < n; i++) { const w = addDays(firstWeek, 7 * i); weeks.push(muscleSets(fin, B, w, addDays(w, 6))); }
+    B.muscleIds.forEach(m => {
+      const met = weeks.map(w => w[m] >= RANK_SETS);
+      const cur = met[n - 1];
+      let streak = 0;
+      for (let i = cur ? n - 1 : n - 2; i >= 0 && met[i]; i--) streak++;
+      let best = 0, run = 0;
+      met.forEach(x => { run = x ? run + 1 : 0; best = Math.max(best, run); });
+      const rank = rankFor(streak);
+      const nxt = RANKS.find(x => x.weeks > streak) || null;
+      out[m] = { streak, best, rank, next: nxt ? { id: nxt.id, need: nxt.weeks - streak } : null,
+        thisWeek: weeks[n - 1][m], metThisWeek: !!cur, atRisk: !cur && streak > 0, ever: weeks.some(w => w[m] > 0) };
+    });
+    return out;
+  }
+  /* The least-trained muscles over the last `days`, once there are at least 2 sessions to judge from. */
+  function leastTrained(sessions, B, today, days) {
+    days = days || 28;
+    const from = addDays(today, -(days - 1));
+    const sets = muscleSets(sessions, B, from, today);
+    const count = (sessions || []).filter(s => s && s.end && s.date >= from && s.date <= today).length;
+    const perWeekFloor = 1.5 * days / 7;
+    const list = B.muscleIds.slice().sort((a, b) => sets[a] - sets[b] || B.muscleIds.indexOf(a) - B.muscleIds.indexOf(b))
+      .filter(m => sets[m] < perWeekFloor).slice(0, 3);
+    return { enough: count >= 2, sessions: count, sets, list };
+  }
+
+  /* ---------- injuries ---------- */
+  /* injuries: [{ area, side, level: 'ease' | 'avoid', since, note }]. An exercise is hit hard when the area is one of
+     its main muscles or loaded joints, lightly when it's a supporting muscle. Avoid + hard = leave it out;
+     avoid + light or ease + hard = ease off; ease + light = fine. */
+  function injuryHit(exId, injuries, B) {
+    const tag = B.EXM[exId]; const res = { level: null, areas: [] };
+    if (!tag || !injuries || !injuries.length) return res;
+    injuries.forEach(inj => {
+      if (!inj || !inj.area) return;
+      const hard = tag.p.includes(inj.area) || tag.j.includes(inj.area), light = tag.s.includes(inj.area);
+      let lv = null;
+      if (inj.level === 'avoid') lv = hard ? 'avoid' : light ? 'ease' : null;
+      else if (inj.level === 'ease') lv = hard ? 'ease' : null;
+      if (!lv) return;
+      if (!res.areas.includes(inj.area)) res.areas.push(inj.area);
+      if (lv === 'avoid' || !res.level) res.level = lv;
+    });
+    return res;
+  }
+  /* The standard item for an exercise: taken from the programmes when it's in one, otherwise sensible defaults. */
+  function defaultItem(exId, EX, PR) {
+    const ex = EX.byId[exId]; if (!ex) return null;
+    if (PR) for (const pid of Object.keys(PR.programs)) for (const tpl of PR.programs[pid].templates) {
+      const it = tpl.items.find(x => x.ex === exId && !x.finisher);
+      if (it) { const c = { ex: exId, sets: it.sets, rest: it.rest }; if (it.reps) c.reps = it.reps.slice(); if (it.secs) c.secs = it.secs.slice(); return c; }
+    }
+    const iso = ex.pattern === 'iso', core = ex.pattern === 'core';
+    if (ex.kind === 'time') return { ex: exId, sets: 2, secs: [20, 40], rest: 45 };
+    if (ex.kind === 'carry') return { ex: exId, sets: 2, secs: [30, 45], rest: 60 };
+    if (core) return { ex: exId, sets: 2, reps: [6, 10], rest: 45 };
+    if (iso) return { ex: exId, sets: 2, reps: [10, 15], rest: 60 };
+    return { ex: exId, sets: 3, reps: [8, 12], rest: ex.kind === 'bw' ? 60 : 90 };
+  }
+  /* Apply injuries to a session's items. Returns { items, skipped }. Each changed item gets
+     inj: { how: 'swap' | 'ease', areas, from } and ease: true when it should be lighter. */
+  function adjustForInjuries(items, injuries, ctx) {
+    const B = ctx.B, EX = ctx.EX, PR = ctx.PR;
+    const out = [], skipped = [];
+    const used = new Set(items.map(i => i.ex));
+    items.forEach(orig => {
+      const it = Object.assign({}, orig);
+      if (it.finisher || it.mins) { out.push(it); return; }
+      const hit = injuryHit(it.ex, injuries, B);
+      if (!hit.level) { out.push(it); return; }
+      if (hit.level === 'ease') { it.ease = true; it.inj = { how: 'ease', areas: hit.areas }; out.push(it); return; }
+      const ex = EX.byId[it.ex];
+      /* Same movement first, then anything that trains the same main muscles. */
+      const prim = B.EXM[it.ex] ? B.EXM[it.ex].p : [];
+      const shared = EX.list.filter(e => B.EXM[e.id] && B.EXM[e.id].p.some(m => prim.includes(m))).map(e => e.id);
+      const cands = [...new Set([].concat(ex.alts || [], ex.easier ? [ex.easier] : [], EX.list.filter(e => e.pattern === ex.pattern).map(e => e.id), shared))]
+        .filter(id => id !== it.ex && EX.byId[id] && EX.byId[id].kind !== 'cardio' && B.EXM[id] && !used.has(id));
+      const scored = cands.map(id => ({ id, h: injuryHit(id, injuries, B) })).filter(c => c.h.level !== 'avoid');
+      const pick = scored.find(c => !c.h.level) || scored[0];
+      if (!pick) { skipped.push({ ex: it.ex, areas: hit.areas }); return; }
+      const rep = Object.assign(defaultItem(pick.id, EX, PR), { sets: it.sets });
+      if (it.focus) rep.focus = true;
+      rep.inj = { how: 'swap', areas: hit.areas, from: it.ex };
+      if (pick.h.level === 'ease') rep.ease = true;
+      used.add(pick.id);
+      out.push(rep);
+    });
+    return { items: out, skipped };
+  }
+
+  /* ---------- focus blocks and custom workouts ---------- */
+  const focusActive = (f, today) => !!(f && f.muscle && f.ex && isKey(f.start) && today >= f.start && today < addDays(f.start, 7 * (f.weeks || 3)));
+  const focusWeek = (f, today) => Math.floor(daysBetween(f.start, today) / 7) + 1;
+  /* The add-on exercise for a focus block: trains the muscle directly, isn't blocked by an injury, and prefers
+     small isolation moves and exercises you already have numbers for. */
+  function pickFocusExercise(muscle, ctx, exclude) {
+    const B = ctx.B, EX = ctx.EX, ex = new Set(exclude || []);
+    const c = EX.list.filter(e => e.kind !== 'cardio' && B.EXM[e.id] && B.EXM[e.id].p.includes(muscle) && !ex.has(e.id))
+      .map(e => { const h = injuryHit(e.id, ctx.injuries, B); return { e, h, score: (e.pattern === 'iso' || e.pattern === 'core' ? 2 : 0) + (ctx.lifts && ctx.lifts[e.id] ? 1 : 0) - (h.level === 'ease' ? 3 : 0) - B.EXM[e.id].p.length * 0.3 }; })
+      .filter(x => x.h.level !== 'avoid').sort((a, b) => b.score - a.score);
+    return c.length ? c[0].e.id : null;
+  }
+  /* Rule-based workout for some muscles: exercises that train them directly first, then ones that help,
+     never one blocked by an injury, big lifts first. Returns items with sets, reps or secs and rest. */
+  function buildWorkout(muscles, ctx, max) {
+    const B = ctx.B, EX = ctx.EX, PR = ctx.PR, target = new Set(muscles || []);
+    max = max || 5;
+    const prefer = new Set(ctx.prefer || []);
+    const cands = EX.list.filter(e => e.kind !== 'cardio' && B.EXM[e.id]).map(e => {
+      const tag = B.EXM[e.id];
+      const p = tag.p.filter(m => target.has(m)).length, s = tag.s.filter(m => target.has(m)).length;
+      if (!p && !s) return null;
+      const h = injuryHit(e.id, ctx.injuries, B);
+      if (h.level === 'avoid') return null;
+      const big = e.pattern !== 'iso' && e.pattern !== 'core' && e.pattern !== 'carry';
+      const known = !!(ctx.lifts && ctx.lifts[e.id]) || prefer.has(e.id);
+      /* Harder versions (push-up, split squat) only once you've done them or they're in your programme. */
+      const tooHard = e.easier && !known;
+      return { e, p, h, score: p * 2 + s * 0.5 + (ctx.lifts && ctx.lifts[e.id] ? 0.6 : 0) + (prefer.has(e.id) ? 0.5 : 0) + (big ? 0.4 : 0) - (tooHard ? 1 : 0) - (h.level === 'ease' ? 1 : 0), big };
+    }).filter(Boolean).sort((a, b) => b.score - a.score);
+    /* Full body: one exercise per movement so it isn't three squats. Legs or upper body: two. One area (back,
+       chest): up to four, since a back day is mostly pulls. Small moves (isolation, core, carries): up to four. */
+    const bigCap = target.size >= 7 ? 1 : target.size >= 3 ? 2 : 4;
+    const picked = [], covered = new Set();
+    const add = c => { picked.push(c); B.EXM[c.e.id].p.forEach(m => covered.add(m)); };
+    const room = c => !picked.includes(c) && picked.filter(x => x.e.pattern === c.e.pattern).length < (c.big ? bigCap : 4);
+    for (const m of muscles || []) {
+      if (picked.length >= max) break;
+      if (covered.has(m)) continue;
+      const c = cands.find(x => x.p && room(x) && B.EXM[x.e.id].p.includes(m));
+      if (c) add(c);
+    }
+    for (const c of cands) { if (picked.length >= max) break; if (c.p && room(c)) add(c); }
+    for (const c of cands) { if (picked.length >= Math.min(4, max)) break; if (room(c)) add(c); }
+    const order = c => (c.big ? 0 : c.e.pattern === 'iso' ? 1 : 2);
+    picked.sort((a, b) => order(a) - order(b) || b.score - a.score);
+    return picked.map((c, i) => {
+      const it = defaultItem(c.e.id, EX, PR);
+      it.sets = c.big && i < 2 ? 3 : 2;
+      if (c.h.level === 'ease') { it.ease = true; it.inj = { how: 'ease', areas: c.h.areas }; }
+      return it;
+    });
+  }
+  /* Checks a workout the coach wrote: { title, items: [{ id, sets }] }. Unknown, duplicate, cardio and injury-blocked
+     exercises are dropped; sets are kept to 1–4; reps and weights come from the app, not the AI. */
+  function validateWorkout(w, ctx) {
+    const B = ctx.B, EX = ctx.EX, PR = ctx.PR;
+    const res = { ok: false, title: '', items: [], dropped: [] };
+    if (!w || typeof w !== 'object' || !Array.isArray(w.items)) return res;
+    res.title = String(w.title || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    const seen = new Set();
+    w.items.slice(0, 10).forEach(x => {
+      const id = String((x && (x.id || x.ex)) || '').trim();
+      if (!EX.byId[id] || !B.EXM[id]) { if (id) res.dropped.push({ id, why: 'unknown' }); return; }
+      if (seen.has(id)) return;
+      const h = injuryHit(id, ctx.injuries, B);
+      if (h.level === 'avoid') { res.dropped.push({ id, why: 'injury', areas: h.areas }); return; }
+      if (res.items.length >= 7) return;
+      seen.add(id);
+      const it = defaultItem(id, EX, PR);
+      const sets = Math.round(+x.sets);
+      if (sets >= 1) it.sets = clamp(sets, 1, 4);
+      if (h.level === 'ease') { it.ease = true; it.inj = { how: 'ease', areas: h.areas }; }
+      res.items.push(it);
+    });
+    res.ok = res.items.length >= 2;
+    return res;
+  }
+  function validateFocus(f, ctx) {
+    if (!f || typeof f !== 'object') return null;
+    const muscle = String(f.muscle || '').trim();
+    if (!ctx.B.muscleIds.includes(muscle)) return null;
+    const ex = pickFocusExercise(muscle, ctx);
+    if (!ex) return null;
+    return { muscle, ex, weeks: clamp(Math.round(+f.weeks) || 3, 2, 4) };
+  }
+  /* Which muscle groups a request mentions ("back workout", "trening za noge"). "Lower back" isn't the back group. */
+  function groupsIn(text, B) {
+    const s = String(text || '').toLowerCase().replace(/lower back|low back|donj\w* (dio |dijel\w* )?le[dđ]\w*|kri[žz]\w*/g, ' ');
+    return B.GROUPS.filter(g => g.re.test(s)).map(g => g.id);
+  }
+
   return { pad, dkey, isKey, parseKey, addDays, daysBetween, weekStart, clamp, num, READINESS_QS, bpHigh, readiness,
     sessionsIn, setsFor, roundKg, target, painZone, evaluate, activeKcal, STRENGTH_MET, sessionMinutes, finisherMinutes,
-    weekStats, weeksBack, autoCheck, retestStatus, liftHistory };
+    weekStats, weeksBack, autoCheck, retestStatus, liftHistory,
+    muscleSets, muscleLevel, RANKS, RANK_SETS, rankFor, muscleRanks, leastTrained,
+    injuryHit, defaultItem, adjustForInjuries, focusActive, focusWeek, pickFocusExercise, buildWorkout, validateWorkout, validateFocus, groupsIn };
 });

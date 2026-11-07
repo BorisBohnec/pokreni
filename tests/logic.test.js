@@ -153,6 +153,8 @@ test('i18n: English and Croatian have the same keys, and every key the app uses 
   ['wall', 'bench', 'floor'].forEach(v => dynamic.push('push_' + v));
   PK.READINESS_QS.forEach(q => dynamic.push('rq_' + q));
   ['green', 'yellow', 'red', 'emergency'].forEach(z => dynamic.push('z_' + z));
+  ['start', 'bronze', 'silver', 'gold', 'diamond'].forEach(r => dynamic.push('rank_' + r));
+  ['injNone', 'injEase', 'injAvoid', 'injNoneHow', 'injEaseHow', 'injAvoidHow', 'last7d', 'last4w', 'front', 'backView', 'wkByApp', 'wkByCoach', 'wkSavedSub', 'wkBuiltSub', 'weekOne', 'weekFew', 'weekMany', 'wkTitle', 'wkFromCoach'].forEach(k => dynamic.push(k));
   ['painFine', 'painMeh', 'painSharp', 'easier', 'harder', 'tRestHr', 'tWaist', 'tWalk', 'tChair', 'tPush', 'tPlank'].forEach(k => dynamic.push(k));
   ['tRestHr', 'tWaist', 'tWalk', 'tChair', 'tPush', 'tPlank'].forEach(k => dynamic.push(k + 'How'));
   const missing = [...new Set(used.concat(dynamic))].filter(k => !(k in I.en));

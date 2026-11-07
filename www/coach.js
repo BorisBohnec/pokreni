@@ -35,6 +35,24 @@
     if (s.secs) parts.push(`${s.secs} s`);
     return parts.join(' × ') + (s.rir != null && s.rir !== '' ? ` @RIR ${s.rir}` : '');
   }
+  /* Questions that may want a workout built: the catalogue and the <workout> format are only sent for these. */
+  const WANTS = /\b(workouts?|sessions?|routines?|programm?e?s?|exercises for|make me|build me|plan around|least|neglect\w*|weak\w*|trening\w*|vje[zž]b\w*|napravi|slo[zž]i|sastavi|isplaniraj|program\w*|najmanje|zanemar\w*|slab\w*)\b/i;
+  const wantsWorkout = q => WANTS.test(String(q || ''));
+  function parseLoose(raw) {
+    let s = String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    try { return JSON.parse(s); } catch (e) { /* try a gentler parse */ }
+    s = s.replace(/,\s*([}\]])/g, '$1').replace(/'/g, '"');
+    try { return JSON.parse(s); } catch (e) { return 'bad'; }
+  }
+  /* Pulls <workout>{…}</workout> and <focus>{…}</focus> out of an answer. Each is null (absent), 'bad' or the object.
+     A block cut off by the length limit counts as bad. */
+  function extractBlocks(text) {
+    const out = { workout: null, focus: null };
+    let body = String(text || '').replace(/<(workout|focus)>([\s\S]*?)<\/\1>/gi, (m, kind, raw) => { out[kind.toLowerCase()] = parseLoose(raw); return ''; });
+    body = body.replace(/<(workout|focus)>[\s\S]*$/i, (m, kind) => { if (out[kind.toLowerCase()] == null) out[kind.toLowerCase()] = 'bad'; return ''; });
+    out.text = body.trim();
+    return out;
+  }
   const painWord = p => (p == null ? 'not rated' : p <= 3 ? 'fine' : p <= 5 ? `uncomfortable (${p}/10)` : `painful (${p}/10)`);
 
   /*
@@ -88,16 +106,34 @@
     const lifts = Object.keys(D.lifts || {}).map(id => { const l = D.lifts[id]; return `${exn(id)} ${l.kg != null ? r1(l.kg) + ' kg' : ''}${l.reps ? ' × ' + l.reps : ''}${l.secs ? ' ' + l.secs + ' s' : ''}`.trim(); });
     if (lifts.length) L.push(`Next-time targets the app set: ${lifts.join('; ')}.`);
 
+    const B = o.B;
+    if (B) {
+      const mn = id => (B.byId[id] ? B.byId[id].en.toLowerCase() : id);
+      const fmt = sets => B.muscleIds.filter(m => sets[m] > 0).sort((a, b) => sets[b] - sets[a]).map(m => `${mn(m)} ${r1(sets[m])}`).join(', ') || 'nothing yet';
+      const s7 = PK.muscleSets(D.sessions, B, PK.addDays(today, -6), today), s28 = PK.muscleSets(D.sessions, B, PK.addDays(today, -27), today);
+      const zero = B.muscleIds.filter(m => !s28[m]).map(mn);
+      L.push(`Body map (sets per muscle; a main-muscle set counts 1, a supporting one 0.5): last 7 days: ${fmt(s7)}. Last 28 days: ${fmt(s28)}${zero.length ? `; no sets in 28 days: ${zero.join(', ')}` : ''}.`);
+      const lt = PK.leastTrained(D.sessions, B, today, 28);
+      if (lt.enough && lt.list.length) L.push(`Least trained in 28 days: ${lt.list.map(m => `${mn(m)} ${r1(lt.sets[m])} sets`).join(', ')}.`);
+      else if (!lt.enough) L.push('Least trained: not enough sessions yet to judge (needs 2 in 28 days).');
+      const R = PK.muscleRanks(D.sessions, B, today);
+      const streaks = B.muscleIds.filter(m => R[m].streak).map(m => `${mn(m)} ${R[m].streak}`);
+      if (streaks.length) L.push(`Weeks in a row with ${PK.RANK_SETS}+ sets: ${streaks.join(', ')}.`);
+      const inj = D.injuries || [];
+      L.push(inj.length ? `Injuries marked in the app: ${inj.map(x => `${x.side === 'L' ? 'left ' : x.side === 'R' ? 'right ' : ''}${mn(x.area)}: ${x.level === 'avoid' ? 'AVOID loading it' : 'ease off (lighter, fewer sets)'} since ${x.since}${x.note ? ` ("${String(x.note).slice(0, 120)}")` : ''}`).join('; ')}. The app already swaps out exercises that load an AVOID area and lightens those for an ease-off area.` : 'Injuries marked in the app: none.');
+      if (PK.focusActive(D.focus, today)) L.push(`Focus block running: ${mn(D.focus.muscle)} with ${exn(D.focus.ex)} added to each session, week ${PK.focusWeek(D.focus, today)} of ${D.focus.weeks}.`);
+    }
+
     const weeks = PK.weeksBack(D, today, 4, (D.hc && D.hc.ext) || {});
     L.push(`Weekly activity (Monday-start weeks, oldest first, goal 150 active minutes and 2+ strength days): ${weeks.map(w => `${w.week}: ${w.strengthDays} strength days, ${w.cardioMin} active min`).join('; ')}.`);
     const from = PK.addDays(today, -14);
     const cardio = (D.cardio || []).filter(c => c.date >= from).sort((a, b) => (a.date < b.date ? 1 : -1));
     if (cardio.length) L.push(`Walks and rides, last 14 days: ${cardio.map(c => `${c.date} ${exn(c.type)} ${c.minutes} min ${['easy', 'moderate', 'hard'][c.effort] || ''}`).join('; ')}.`);
 
-    const B = D.baselines || [];
-    if (B.length) {
+    const BL = D.baselines || [];
+    if (BL.length) {
       const f = b => ['restHr', 'waistCm', 'walkM', 'chairStands', 'pushReps', 'plankS'].filter(k => b[k] != null).map(k => `${k} ${b[k]}`).join(', ');
-      L.push(`Tests: first ${B[0].date}: ${f(B[0])}${B.length > 1 ? `; latest ${B[B.length - 1].date}: ${f(B[B.length - 1])}` : ''}.`);
+      L.push(`Tests: first ${BL[0].date}: ${f(BL[0])}${BL.length > 1 ? `; latest ${BL[BL.length - 1].date}: ${f(BL[BL.length - 1])}` : ''}.`);
     }
 
     const doneL = LS.list.filter(l => o.lessonDone(l.id)), nextL = LS.list.find(l => !o.lessonDone(l.id));
@@ -118,7 +154,14 @@
 
     const links = `Lesson ids: ${LS.list.map(l => `${l.id} ${en(l.title)}`).join('; ')}.\nExercise ids: ${EX.list.map(e => `${e.id} (${en(e.name)})`).join('; ')}.`;
     const hist = ((D.coach && D.coach.msgs) || []).filter(m => m.role === 'user' || m.role === 'coach').slice(-8)
-      .map(m => `${m.role === 'user' ? 'User' : 'Coach'}: ${String(m.text).slice(0, 1200)}`).join('\n');
+      .map(m => `${m.role === 'user' ? 'User' : 'Coach'}: ${String(m.text).replace(/<workout>[\s\S]*?<\/workout>/gi, '[workout card]').replace(/<focus>[\s\S]*?<\/focus>/gi, '[focus block card]').slice(0, 1200)}`).join('\n');
+    const wants = !!B && wantsWorkout(o.question);
+    let blockRules = '';
+    if (B) {
+      blockRules += `\n- Focus blocks: if they want extra work for a weak or least-trained muscle over the next weeks, end your answer with one block exactly like <focus>{"muscle":"calves","weeks":3}</focus> (muscle ids: ${B.muscleIds.join(', ')}; 2-4 weeks). The app then adds one exercise for that muscle to each normal session and shows a Start button.`;
+      if (wants) blockRules += `\n- Workouts: only if they ask you to make, build or plan a workout or session, write 1-3 short sentences on the idea, then end with one block exactly like <workout>{"title":"Back and biceps","items":[{"id":"lat_pulldown","sets":3},{"id":"cable_row","sets":3}]}</workout>. Use 4-6 exercises from the catalogue below (ids only), biggest movements first, 2-3 sets each (2 while they're in their first 4 sessions). Never include an exercise that loads an area marked AVOID; for ease-off areas pick gentler options. The app fills in weights and reps from their history, so don't give weights, and don't list the exercises in your text: the app shows them as a card with Use today and Save buttons. Title in the answer's language, under 30 characters.`;
+    }
+    const catalogue = wants ? `\nExercise catalogue for workouts (id: main muscles / supporting / loaded joints):\n${EX.list.filter(e => B.EXM[e.id]).map(e => { const g = B.EXM[e.id]; return `${e.id}: ${g.p.join(', ')} / ${g.s.join(', ') || '-'} / ${g.j.join(', ') || '-'}`; }).join('\n')}` : '';
 
     const prompt = `You are the coach inside PoKreni, a training app for a beginner. Be practical, warm and direct.
 Rules:
@@ -130,13 +173,13 @@ Rules:
 - If the readiness check says not yet cleared by a doctor, don't programme gym training; encourage the doctor visit and easy walking or cycling meanwhile.
 - Training advice follows the app's rules above. Don't tell them to train to failure, jump weights, run or jump while joints adapt, or double up missed sessions. If you suggest changing a weight or exercise, say they can do it in the session (Swap, or typing another weight).
 - Food advice stays within Tanjur's targets. Never suggest eating below the calorie target, below 1,500 kcal a day, skipping meals before training, or extreme diets.
-- To point to a lesson or an exercise, put a tag such as [[lesson:L07]] or [[ex:goblet_squat]] at the end of a sentence. Use only ids from the lists below, at most 3 tags.
+- To point to a lesson or an exercise, put a tag such as [[lesson:L07]] or [[ex:goblet_squat]] at the end of a sentence. Use only ids from the lists below, at most 3 tags.${blockRules}
 ${langLine(lang)}
 
 Data:
 ${L.join('\n')}
 
-${links}
+${links}${catalogue}
 ${hist ? `\nConversation so far (oldest first):\n${hist}\n` : ''}
 New question: ${String(o.question || '').slice(0, 1500)}`;
     return { prompt, lang };
@@ -145,7 +188,7 @@ New question: ${String(o.question || '').slice(0, 1500)}`;
   /* Answer → { html, links: [{ kind, id }] }. Text is escaped; "- " lines become a list; **bold** is kept. */
   function renderAnswer(text, EX, LS) {
     const links = [];
-    const body = String(text || '').replace(/\[\[(lesson|ex):([A-Za-z0-9_]+)\]\]/g, (m, kind, id) => {
+    const body = extractBlocks(text).text.replace(/\[\[(lesson|ex):([A-Za-z0-9_]+)\]\]/g, (m, kind, id) => {
       const ok = kind === 'lesson' ? LS.byId[id] : EX.byId[id];
       if (ok && !links.some(l => l.kind === kind && l.id === id) && links.length < 4) links.push({ kind, id });
       return '';
@@ -164,5 +207,5 @@ New question: ${String(o.question || '').slice(0, 1500)}`;
     return { html: out.join(''), links };
   }
 
-  return { buildPrompt, renderAnswer, detectLang };
+  return { buildPrompt, renderAnswer, detectLang, extractBlocks, wantsWorkout };
 });

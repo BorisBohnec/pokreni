@@ -1,7 +1,7 @@
 /* PoKreni: learn to train safely and log gym sessions. Plain JS, no build step. Pairs with Tanjur through Health Connect. */
 (function () {
 'use strict';
-const PK = window.PK, EX = window.PK_EXERCISES, PR = window.PK_PROGRAMS, LS = window.PK_LESSONS, I18N = window.PK_I18N, AIX = window.PK_AI, COACH = window.PK_COACH;
+const PK = window.PK, EX = window.PK_EXERCISES, PR = window.PK_PROGRAMS, LS = window.PK_LESSONS, I18N = window.PK_I18N, AIX = window.PK_AI, COACH = window.PK_COACH, BODY = window.PK_BODY;
 const { dkey, addDays, parseKey, weekStart, clamp, num, daysBetween } = PK;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -58,6 +58,7 @@ const ICONS = {
   up: '<path d="M6 15l6-6 6 6"/>',
   minus: '<path d="M5 12h14"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
+  target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".8"/>',
   sync: '<path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9M4.5 12a7.5 7.5 0 0 1 13.2-4.9"/><path d="M18.5 3.5v4h-4M5.5 20.5v-4h4"/>'
 };
 const icon = (n, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n] || ''}</svg>`;
@@ -93,10 +94,11 @@ const S = {
   settings: { health: { on: false }, remind: { on: false, time: '16:30' } },
   hc: { weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, syncedAt: 0, granted: [] },
   tanjur: null, coach: { msgs: [] }, aiUsage: null,
+  injuries: [], focus: null, workouts: [], planned: null,
   savedAt: 0
 };
 const U = { tab: 'today', rest: null, tick: 0, sheets: [], hcBusy: false, tanjur: null, tjState: '', tjAt: 0, gradDismissed: false,
-  ai: null, tjUsage: null, coachBusy: null, coachDraft: '', coachLang: '' };
+  ai: null, tjUsage: null, coachBusy: null, coachDraft: '', coachLang: '', bmDays: 7, draftW: null };
 
 function applyData(d) {
   if (!d || typeof d !== 'object') return;
@@ -116,12 +118,17 @@ function applyData(d) {
   if (S.tanjur) delete S.tanjur.ai;
   S.coach = d.coach && Array.isArray(d.coach.msgs) ? { msgs: d.coach.msgs.slice(-40) } : { msgs: [] };
   S.aiUsage = d.aiUsage && d.aiUsage.month ? d.aiUsage : null;
+  S.injuries = Array.isArray(d.injuries) ? d.injuries.filter(x => x && BODY.byId[x.area] && (x.level === 'ease' || x.level === 'avoid')) : [];
+  S.focus = d.focus && BODY.byId[d.focus.muscle] && EX.byId[d.focus.ex] ? d.focus : null;
+  S.workouts = Array.isArray(d.workouts) ? d.workouts.filter(w => w && w.id && Array.isArray(w.items) && w.items.every(i => i && EX.byId[i.ex])) : [];
+  S.planned = d.planned && d.planned.w && Array.isArray(d.planned.w.items) && d.planned.w.items.every(i => i && EX.byId[i.ex]) ? d.planned : null;
   S.savedAt = d.savedAt || 0;
 }
 function snapshot() {
   S.savedAt = Date.now();
   return JSON.stringify({ app: 'pokreni', version: 1, savedAt: S.savedAt, profile: S.profile, readiness: S.readiness, baselines: S.baselines, lessons: S.lessons, quiz: S.quiz,
-    program: S.program, lifts: S.lifts, sessions: S.sessions, cardio: S.cardio, active: S.active, settings: S.settings, hc: S.hc, tanjur: S.tanjur, coach: S.coach, aiUsage: S.aiUsage });
+    program: S.program, lifts: S.lifts, sessions: S.sessions, cardio: S.cardio, active: S.active, settings: S.settings, hc: S.hc, tanjur: S.tanjur, coach: S.coach, aiUsage: S.aiUsage,
+    injuries: S.injuries, focus: S.focus, workouts: S.workouts, planned: S.planned });
 }
 let saveTimer = 0, saveChain = Promise.resolve(), dirty = false, warned = false;
 function persist() { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flushSave, 300); }
@@ -194,13 +201,79 @@ function lessonDone(id) {
   return !!(S.lessons[id] && S.lessons[id].done);
 }
 const nextLesson = () => LS.list.find(l => !lessonDone(l.id)) || null;
-function planFor(tpl, lighter) {
-  const n = doneInProgram();
-  return tpl.items.map(it => {
-    const ex = EX.byId[it.ex];
-    return { item: it, ex, target: PK.target(ex, it, S.lifts[it.ex], { doneInProgram: n, lighter }) };
-  });
+/* ---------- body map, injuries, focus blocks, your own workouts ---------- */
+const programPrefer = () => [...new Set(program().templates.flatMap(tp => tp.items.map(i => i.ex)))];
+const bctx = () => ({ B: BODY, EX, PR, injuries: S.injuries, lifts: S.lifts, prefer: programPrefer() });
+const areaName = id => (BODY.byId[id] ? tx(BODY.byId[id]) : id);
+const sideWord = s => (s === 'L' ? t('sideLeft') : s === 'R' ? t('sideRight') : '');
+const injuryOf = area => S.injuries.find(x => x.area === area) || null;
+const injuryName = inj => areaName(inj.area) + (inj.side === 'L' || inj.side === 'R' ? ' · ' + sideWord(inj.side) : '');
+const areasText = areas => (areas || []).map(a => { const inj = injuryOf(a); return inj ? injuryName(inj) : areaName(a); }).join(', ');
+const activeFocus = () => (PK.focusActive(S.focus, today()) ? S.focus : null);
+const both = (key, en, hr) => ({ en: I18N.en[key].replace(/\{(\w+)\}/g, (m, k) => (en[k] != null ? en[k] : m)), hr: I18N.hr[key].replace(/\{(\w+)\}/g, (m, k) => (hr[k] != null ? hr[k] : m)) });
+/* Croatian counts: 1 tjedan, 2–4 tjedna, 5+ tjedana. */
+function weeksWord(n) {
+  if (LANG !== 'hr') return n === 1 ? t('weekOne') : t('weekMany');
+  const d = n % 10, h = n % 100;
+  return d === 1 && h !== 11 ? t('weekOne') : d >= 2 && d <= 4 && (h < 12 || h > 14) ? t('weekFew') : t('weekMany');
 }
+/* Warm-up moves that load an area marked "avoid" are left out. */
+function warmupList() { const avoid = new Set(S.injuries.filter(x => x.level === 'avoid').map(x => x.area)); return PR.WARMUP.filter(w => !(w.areas || []).some(a => avoid.has(a))); }
+/* Today's workout: the one you picked for today (from the coach, the builder or your saved ones), else the next A/B. */
+function todayTemplate() {
+  const P = S.planned;
+  if (P && P.date === today() && P.w && P.w.items.length) return { key: 'X', custom: true, id: P.w.id, name: P.w.title, items: P.w.items };
+  return nextTemplate();
+}
+/* The session's exercises after a focus block and injuries: { items, skipped }. */
+function sessionItems(tpl) {
+  const items = tpl.items.map(i => { const c = clone(i); delete c.ease; delete c.inj; return c; });
+  const f = activeFocus();
+  if (f && !tpl.custom && !items.some(i => i.ex === f.ex)) {
+    const fi = PK.defaultItem(f.ex, EX, PR); fi.sets = 2; fi.focus = true;
+    const at = items.findIndex(i => i.finisher); items.splice(at < 0 ? items.length : at, 0, fi);
+  }
+  return PK.adjustForInjuries(items, S.injuries, bctx());
+}
+/* Easing off for an injury: one set fewer and about 20% less weight, without changing your stored numbers. */
+function planFor(tpl, lighter) {
+  const n = tpl.custom ? S.sessions.length : doneInProgram();
+  const { items, skipped } = sessionItems(tpl);
+  const plan = items.map(it => {
+    const ex = EX.byId[it.ex];
+    const tg = PK.target(ex, it, S.lifts[it.ex], { doneInProgram: n, lighter: lighter || !!it.ease });
+    if (it.ease && tg.kg != null) tg.kg = PK.roundKg(tg.kg * 0.8, ex.step || 2.5);
+    return { item: it, ex, target: tg };
+  });
+  plan.skipped = skipped;
+  return plan;
+}
+function injNote(item) {
+  if (!item.inj) return '';
+  const txt = item.inj.how === 'swap' ? t('injSwapped', { name: exName(item.inj.from), area: areasText(item.inj.areas) }) : t('injEased', { area: areasText(item.inj.areas) });
+  return `<span class="inj-note">${icon('alert')}${esc(txt)}</span>`;
+}
+function setInjury(area, level, side) {
+  const cur = injuryOf(area);
+  if (level === 'none') S.injuries = S.injuries.filter(x => x.area !== area);
+  else if (cur) cur.level = level;
+  else S.injuries.push({ area, level, side: side === 'L' || side === 'R' ? side : 'both', since: today(), note: '' });
+  persist(); scheduleRender(); if (U.sheets.length) renderSheet();
+}
+function startFocus(muscle, weeks) {
+  const ex = PK.pickFocusExercise(muscle, bctx());
+  if (!ex) { toast(t('focusNoEx')); return false; }
+  S.focus = { muscle, ex, start: today(), weeks: weeks || 3 };
+  persist(); scheduleRender(); if (U.sheets.length) renderSheet();
+  toast(t('focusStarted', { muscle: areaName(muscle), name: exName(ex) }));
+  return true;
+}
+function groupTitle(ids) {
+  const gs = ids.map(id => BODY.groupById[id]).filter(Boolean);
+  return both('wkTitle', { g: gs.map(g => g.en).join(' + ') }, { g: gs.map(g => g.hr.toLowerCase()).join(' + ') });
+}
+function planWorkout(w) { S.planned = { date: today(), w: { id: w.id || uid(), title: w.title, items: clone(w.items) } }; persist(); scheduleRender(); }
+function saveWorkout(w) { const c = { id: uid(), title: w.title, items: clone(w.items), at: Date.now() }; S.workouts.unshift(c); S.workouts = S.workouts.slice(0, 20); persist(); return c; }
 function targetText(ex, item, tg) {
   if (item.mins) return t('minEasy', { m: item.mins });
   const range = item.reps ? `${item.reps[0]}–${item.reps[1]}` : `${item.secs[0]}–${item.secs[1]} s`;
@@ -280,7 +353,7 @@ function renderToday() {
   el.innerHTML = html;
 }
 function nextSessionCard(d) {
-  const tpl = nextTemplate(), p = program(), plan = planFor(tpl, false);
+  const tpl = todayTemplate(), p = program(), plan = planFor(tpl, false), f = activeFocus();
   const isGym = (S.profile.gymDays || []).includes(d.getDay());
   const isHome = (S.profile.homeDays || []).includes(d.getDay());
   const sub = isGym ? t('gymDay') : isHome ? t('homeDay') : t('restDay');
@@ -288,14 +361,21 @@ function nextSessionCard(d) {
   return `${grad ? `<section class="card callout good"><h2>${esc(t('gradTitle', { name: tx(PR.programs[p.next].name) }))}</h2><p>${esc(t('gradBody', { n: doneInProgram(), from: tx(p.name), to: tx(PR.programs[p.next].name) }))}</p>
       <div class="row2"><button class="btn primary" data-act="graduate">${esc(t('gradYes'))}</button><button class="btn ghost" data-act="grad-later">${esc(t('notYet'))}</button></div></section>` : ''}
     <section class="card next">
-      <div class="next-head"><div><div class="eyebrow">${esc(tx(p.name))} · ${esc(t('sessionN', { n: doneInProgram() + 1 }))}</div><h2>${esc(tx(tpl.name))}</h2></div>
+      <div class="next-head"><div><div class="eyebrow">${tpl.custom ? esc(t('yourWorkout')) : `${esc(tx(p.name))} · ${esc(t('sessionN', { n: doneInProgram() + 1 }))}`}</div><h2>${esc(tx(tpl.name))}</h2></div>
         <span class="pill">${icon('clock')}${esc(t('aboutMin', { m: estMinutes(tpl) }))}</span></div>
       <p class="day-note ${isGym ? 'gym' : ''}">${esc(sub)}</p>
-      <ol class="plan">${plan.map(({ item, ex, target }) => `<li class="${item.finisher ? 'opt' : ''}"><button class="plan-row" data-act="ex" data-id="${ex.id}">
-        <span class="thumb">${ex.img ? `<img src="img/ex/${ex.id}_0.jpg" alt="" loading="lazy">` : icon(ex.kind === 'cardio' ? 'walk' : 'go')}</span>
-        <span class="plan-main"><span class="plan-name">${esc(tx(ex.name))}${item.finisher ? ` <small>${esc(t('optional'))}</small>` : ''}</span><span class="plan-meta">${esc(targetText(ex, item, target))}</span></span></button></li>`).join('')}</ol>
+      ${f && !tpl.custom ? `<p class="focus-note">${icon('target')}${esc(t('focusNote', { muscle: areaName(f.muscle), w: PK.focusWeek(f, today()), n: f.weeks }))}</p>` : ''}
+      ${planList(plan)}
       <button class="btn primary block big" data-act="start">${icon('go')}${esc(t('startSession'))}</button>
+      <div class="row2 next-tools"><button class="btn small ghost" data-act="pick">${icon('swap')}${esc(t('otherWorkout'))}</button>${tpl.custom ? `<button class="btn small ghost" data-act="plan-clear">${esc(t('backToPlan', { name: tx(nextTemplate().name) }))}</button>` : ''}</div>
     </section>`;
+}
+/* The exercise list for a planned session, with injury and focus notes. Used on Today and in previews. */
+function planList(plan) {
+  return `<ol class="plan">${plan.map(({ item, ex, target }) => `<li class="${item.finisher ? 'opt' : ''}"><button class="plan-row" data-act="ex" data-id="${ex.id}">
+        <span class="thumb">${ex.img ? `<img src="img/ex/${ex.id}_0.jpg" alt="" loading="lazy">` : icon(ex.kind === 'cardio' ? 'walk' : 'go')}</span>
+        <span class="plan-main"><span class="plan-name">${esc(tx(ex.name))}${item.finisher ? ` <small>${esc(t('optional'))}</small>` : ''}${item.focus ? ` <span class="focus-tag">${esc(t('focusTag'))}</span>` : ''}</span><span class="plan-meta">${esc(targetText(ex, item, target))}</span>${injNote(item)}</span></button></li>`).join('')}</ol>
+    ${plan.skipped && plan.skipped.length ? `<p class="banner inj">${icon('alert')}${esc(t('injSkipped', { names: plan.skipped.map(x => exName(x.ex)).join(', '), area: areasText([...new Set(plan.skipped.flatMap(x => x.areas))]) }))}</p>` : ''}`;
 }
 function weekCard(k) {
   const ws = weekStart(k), w = PK.weekStats(S, ws, extMinutes());
@@ -360,11 +440,11 @@ function startSession() {
   openSheet('checkin');
 }
 function beginSession(lighter, painToday) {
-  const tpl = nextTemplate(), p = program();
+  const tpl = todayTemplate(), p = program();
   const plan = planFor(tpl, lighter);
   S.active = {
-    id: uid(), program: p.id, template: tpl.key, name: tpl.name, date: today(), start: new Date().toISOString(),
-    lighter: !!lighter, painToday: !!painToday, warmup: {}, warmOpen: true,
+    id: uid(), program: tpl.custom ? 'custom' : p.id, template: tpl.key, name: tpl.name, custom: !!tpl.custom, date: today(), start: new Date().toISOString(),
+    lighter: !!lighter, painToday: !!painToday, warmup: {}, warm: warmupList().map(w => w.id), warmOpen: true,
     items: plan.map(({ item, ex, target }) => ({ ex: ex.id, orig: ex.id, item: clone(item), target, sets: mkSets(ex, item, target), pain: null, open: false }))
   };
   const first = S.active.items.find(it => !it.item.finisher); if (first) first.open = true;
@@ -379,11 +459,12 @@ function renderTrain() {
   const el = $('#view-train'), A = S.active;
   if (!A) { el.innerHTML = ''; return; }
   const elapsed = (Date.now() - Date.parse(A.start)) / 1000;
-  let html = `<header class="train-head"><div><div class="eyebrow">${esc(tx(program().name))}${A.lighter ? ' · ' + esc(t('lighterDay')) : ''}</div><h1>${esc(tx(A.name))}</h1></div>
+  const warm = PR.WARMUP.filter(w => !A.warm || A.warm.includes(w.id));
+  let html = `<header class="train-head"><div><div class="eyebrow">${esc(A.custom ? t('yourWorkout') : tx(program().name))}${A.lighter ? ' · ' + esc(t('lighterDay')) : ''}</div><h1>${esc(tx(A.name))}</h1></div>
     <div class="elapsed" id="elapsed">${mmss(elapsed)}</div></header>`;
   if (A.lighter) html += `<p class="banner info">${icon('info')}${esc(t('lighterBody'))}</p>`;
-  html += `<section class="card warm"><button class="warm-head" data-act="warm-toggle"><h2>${esc(t('warmup'))}</h2><span class="muted small">${Object.values(A.warmup).filter(Boolean).length}/${PR.WARMUP.length}</span>${icon(A.warmOpen ? 'up' : 'down', 'chev')}</button>
-    ${A.warmOpen ? `<ul class="checklist">${PR.WARMUP.map(w => `<li><label><input type="checkbox" data-warm="${w.id}" ${A.warmup[w.id] ? 'checked' : ''}><span>${esc(tx(w))}</span></label></li>`).join('')}</ul>` : ''}</section>`;
+  html += `<section class="card warm"><button class="warm-head" data-act="warm-toggle"><h2>${esc(t('warmup'))}</h2><span class="muted small">${warm.filter(w => A.warmup[w.id]).length}/${warm.length}</span>${icon(A.warmOpen ? 'up' : 'down', 'chev')}</button>
+    ${A.warmOpen ? `<ul class="checklist">${warm.map(w => `<li><label><input type="checkbox" data-warm="${w.id}" ${A.warmup[w.id] ? 'checked' : ''}><span>${esc(tx(w))}</span></label></li>`).join('')}</ul>` : ''}</section>`;
   A.items.forEach((it, i) => { html += trainItem(it, i); });
   html += `<div class="train-foot"><button class="btn primary block big" data-act="finish">${icon('check')}${esc(t('finishSession'))}</button>
     <button class="btn ghost block" data-act="discard">${esc(t('discardSession'))}</button></div>`;
@@ -395,7 +476,7 @@ function trainItem(it, i) {
   const complete = done === all;
   const head = `<button class="ti-head" data-act="ti-toggle" data-i="${i}">
       <span class="thumb">${ex.img ? `<img src="img/ex/${ex.id}_0.jpg" alt="" loading="lazy">` : icon(ex.kind === 'cardio' ? 'walk' : 'go')}</span>
-      <span class="ti-main"><span class="ti-name">${esc(tx(ex.name))}${item.finisher ? ` <small>${esc(t('optional'))}</small>` : ''}</span><span class="ti-meta">${esc(targetText(ex, item, it.target))}</span></span>
+      <span class="ti-main"><span class="ti-name">${esc(tx(ex.name))}${item.finisher ? ` <small>${esc(t('optional'))}</small>` : ''}${item.focus ? ` <span class="focus-tag">${esc(t('focusTag'))}</span>` : ''}</span><span class="ti-meta">${esc(targetText(ex, item, it.target))}</span></span>
       <span class="ti-count ${complete ? 'ok' : ''}">${complete ? icon('check') : `${done}/${all}`}</span></button>`;
   if (!it.open) return `<section class="card ti ${complete ? 'complete' : ''}">${head}</section>`;
   const firstTime = (ex.kind === 'load' || ex.kind === 'carry') && it.target.kg == null && !done;
@@ -404,8 +485,9 @@ function trainItem(it, i) {
   const pain = done && !item.mins ? `<div class="pain"><span>${esc(t('howFelt'))}</span><div class="seg small">
       ${[[2, 'painFine'], [5, 'painMeh'], [7, 'painSharp']].map(([v, k]) => `<button data-act="pain" data-i="${i}" data-v="${v}" aria-pressed="${it.pain === v}">${esc(t(k))}</button>`).join('')}</div>
       ${it.pain >= 6 ? `<p class="banner crit">${icon('alert')}${esc(t('painRedAdvice'))}</p>` : it.pain >= 4 ? `<p class="banner warn">${icon('info')}${esc(t('painYellowAdvice'))}</p>` : ''}
-      ${it.pain >= 4 ? `<button class="btn small ghost" data-act="coach" data-q="${esc(t(it.pain >= 6 ? 'painAskRed' : 'painAskYellow', { name: tx(ex.name) }))}">${icon('chat')}${esc(t('askCoach'))}</button>` : ''}</div>` : '';
+      ${it.pain >= 4 ? `<div class="row2"><button class="btn small ghost" data-act="coach" data-q="${esc(t(it.pain >= 6 ? 'painAskRed' : 'painAskYellow', { name: tx(ex.name) }))}">${icon('chat')}${esc(t('askCoach'))}</button>${it.pain >= 6 ? `<button class="btn small ghost danger" data-act="injuries" data-id="${ex.id}">${icon('flag')}${esc(t('markInjury'))}</button>` : ''}</div>` : ''}</div>` : '';
   return `<section class="card ti open ${complete ? 'complete' : ''}">${head}
+    ${item.inj ? `<p class="banner inj">${icon('alert')}${esc(item.inj.how === 'swap' ? t('injSwappedLong', { name: exName(item.inj.from), area: areasText(item.inj.areas) }) : t('injEasedLong', { area: areasText(item.inj.areas) }))}</p>` : ''}
     ${ex.note ? `<p class="banner info">${icon('info')}${esc(tx(ex.note))}</p>` : ''}
     ${firstTime ? `<p class="hint">${esc(t('firstLoadHint'))}</p>` : ''}
     <div class="sets">${setHeader(ex, item)}${rows}</div>
@@ -457,7 +539,11 @@ function swapExercise(i, newId) {
   const item = Object.assign({}, it.item, { ex: newId });
   if ((ex.kind === 'time' || ex.kind === 'carry') && !item.secs) { item.secs = [20, 40]; delete item.reps; }
   if ((ex.kind === 'load' || ex.kind === 'bw') && !item.reps) { item.reps = [8, 12]; delete item.secs; }
-  const tg = PK.target(ex, item, S.lifts[newId], { doneInProgram: doneInProgram(), lighter: S.active.lighter });
+  delete item.inj; delete item.ease;
+  const hit = PK.injuryHit(newId, S.injuries, BODY);
+  if (hit.level === 'ease') { item.ease = true; item.inj = { how: 'ease', areas: hit.areas }; }
+  const tg = PK.target(ex, item, S.lifts[newId], { doneInProgram: S.active.custom ? S.sessions.length : doneInProgram(), lighter: S.active.lighter || !!item.ease });
+  if (item.ease && tg.kg != null) tg.kg = PK.roundKg(tg.kg * 0.8, ex.step || 2.5);
   Object.assign(it, { ex: newId, item, target: tg, sets: mkSets(ex, item, tg), pain: null, open: true });
   persist(); closeAllSheets(); renderTrain();
 }
@@ -472,13 +558,15 @@ function finishSession() {
     const sets = it.sets.map(s => ({ kg: num(s.kg), reps: num(s.reps), secs: num(s.secs), mins: num(s.mins), rir: s.rir === '' || s.rir == null ? null : +s.rir, done: !!s.done }));
     it.done = sets;
     if (it.item.mins || !sets.some(s => s.done)) return;
+    /* Easing off for an injury doesn't move your numbers; they wait for you. */
+    if (it.item.ease && S.lifts[it.ex]) { changes.push({ ex: it.ex, change: { code: 'hold-ease' } }); return; }
     const r = PK.evaluate(ex, it.item, S.lifts[it.ex], { sets, planned: it.sets.length, pain: it.pain, date: A.date });
     if (A.lighter && r.change.code === 'up') { r.lift.kg = r.change.from; r.lift.reps = it.item.reps ? it.item.reps[1] : r.lift.reps; r.change = { code: 'hold-light' }; }
     if (r.lift) S.lifts[it.ex] = r.lift;
     changes.push({ ex: it.ex, change: r.change, lift: r.lift });
   });
   const session = {
-    id: A.id, program: A.program, template: A.template, name: A.name, date: A.date, start: A.start, end, lighter: A.lighter,
+    id: A.id, program: A.program, template: A.template, name: A.name, date: A.date, start: A.start, end, lighter: A.lighter, custom: A.custom || undefined,
     warmup: Object.values(A.warmup).filter(Boolean).length,
     items: A.items.map(it => ({ ex: it.ex, orig: it.orig, mins: it.item.mins || undefined, reps: it.item.reps, secs: it.item.secs, pain: it.pain, sets: it.done })),
     changes
@@ -486,7 +574,9 @@ function finishSession() {
   const mins = PK.sessionMinutes(session), kg = bodyKg() || 90;
   session.kcal = PK.activeKcal(PK.STRENGTH_MET, kg, mins);
   S.sessions.push(session);
-  S.program.next = ((S.program.next || 0) + 1) % program().templates.length;
+  /* Your own workouts don't move the A/B queue. */
+  if (!A.custom) S.program.next = ((S.program.next || 0) + 1) % program().templates.length;
+  else if (S.planned && S.planned.date === A.date) S.planned = null;
   S.active = null; U.rest = null; cancelRestNotif();
   persist(); keepAwake(false);
   writeSessionHC(session);
@@ -501,6 +591,7 @@ function changeText(c) {
     case 'reps': return ch.secs ? t('chSecs', { s: ch.secs }) : t('chReps', { r: ch.reps });
     case 'hold': return t('chHold');
     case 'hold-light': return t('chHoldLight');
+    case 'hold-ease': return t('chHoldEase');
     case 'down': return t('chDown', { kg: n1(ch.to) });
     case 'pain-hold': return t('chPainHold');
     case 'pain-down': return ex.kind === 'load' || ex.kind === 'carry' ? t('chPainDown', { kg: n1(ch.to) }) : t('chPainSwap');
@@ -591,6 +682,7 @@ function renderProgress() {
   const el = $('#view-progress'), k = today();
   const weeks = PK.weeksBack(S, k, 8, extMinutes());
   let html = `<header class="view-head"><div><div class="eyebrow">${esc(t('last8'))}</div><h1>${esc(t('tabProgress'))}</h1></div></header>`;
+  html += bodyCard(k) + ranksCard(k);
   html += `<section class="card"><h2>${esc(t('weeksTitle'))}</h2>${weeksChart(weeks)}<p class="muted small">${esc(t('weeksNote'))}</p></section>`;
   const exIds = [...new Set(S.sessions.flatMap(s => (s.items || []).filter(i => !i.mins && i.sets && i.sets.some(x => x.done)).map(i => i.ex)))];
   html += `<section class="card"><h2>${esc(t('liftsTitle'))}</h2>${exIds.length ? `<ul class="lift-list">${exIds.map(id => liftRow(id)).join('')}</ul>` : `<p class="muted small">${esc(t('liftsEmpty'))}</p>`}</section>`;
@@ -600,6 +692,64 @@ function renderProgress() {
     ? `<li><button class="act-row" data-act="hist" data-id="${h.o.id}">${icon('go')}<span class="act-main">${esc(tx(h.o.name))}<small>${esc(fullDate(h.d))}</small></span><span class="act-meta">${PK.sessionMinutes(h.o)} min</span></button></li>`
     : `<li><button class="act-row" data-act="cardio" data-id="${h.o.id}">${icon('walk')}<span class="act-main">${esc(exName(h.o.type))}<small>${esc(fullDate(h.d))}</small></span><span class="act-meta">${h.o.minutes} min</span></button></li>`).join('')}</ul>` : `<p class="muted small">${esc(t('historyEmpty'))}</p>`}</section>`;
   el.innerHTML = html;
+}
+/* ---------- body map ---------- */
+function bmShape(sh, ox, cls, attrs, inner) {
+  if (sh.el === 'rect') return `<rect x="${sh.x + ox}" y="${sh.y}" width="${sh.w}" height="${sh.h}" rx="${sh.rx}" class="${cls}" ${attrs || ''}>${inner || ''}</rect>`;
+  if (sh.el === 'ellipse') return `<ellipse cx="${sh.cx + ox}" cy="${sh.cy}" rx="${sh.rx}" ry="${sh.ry}" class="${cls}" ${attrs || ''}>${inner || ''}</ellipse>`;
+  return `<circle cx="${sh.cx + ox}" cy="${sh.cy}" r="${sh.r}" class="${cls}" ${attrs || ''}>${inner || ''}</circle>`;
+}
+/* Front and back figure. Muscles are shaded by sets per week; injured areas are red (only the marked side). */
+function bodySvg(levelOf) {
+  const W = 120, H = 262, gap = 16;
+  const hurt = sh => { const inj = injuryOf(sh.a); return inj && (sh.side === 'C' || !inj.side || inj.side === 'both' || inj.side === sh.side) ? inj : null; };
+  const view = (v, ox) => {
+    const sil = BODY.SILHOUETTE.map(sh => bmShape(sh, ox, 'bm-sil')).join('');
+    const muscles = BODY.SHAPES.filter(sh => sh.v === v && !sh.joint).map(sh => { const inj = hurt(sh);
+      return bmShape(sh, ox, `bm-m lv${levelOf(sh.a)}${inj ? ' inj-' + inj.level : ''}`, `data-act="area" data-id="${sh.a}" data-side="${sh.side}"`, `<title>${esc(areaName(sh.a))}</title>`); }).join('');
+    const joints = BODY.SHAPES.filter(sh => sh.v === v && sh.joint).map(sh => { const inj = hurt(sh);
+      return bmShape(sh, ox, `bm-j${inj ? ' inj-' + inj.level : ''}`) + bmShape(Object.assign({}, sh, { r: 8 }), ox, 'bm-hit', `data-act="area" data-id="${sh.a}" data-side="${sh.side}"`, `<title>${esc(areaName(sh.a))}</title>`); }).join('');
+    return `<g>${sil}${muscles}${joints}<text x="${ox + 60}" y="${H + 13}" class="bm-label" text-anchor="middle">${esc(t(v === 'f' ? 'front' : 'backView'))}</text></g>`;
+  };
+  return `<svg class="bodymap" viewBox="0 0 ${W * 2 + gap} ${H + 18}" role="img" aria-label="${esc(t('bodyMap'))}">${view('f', 0)}${view('b', W + gap)}</svg>`;
+}
+function bodyCard(k) {
+  const days = U.bmDays === 28 ? 28 : 7;
+  const sets = PK.muscleSets(S.sessions, BODY, addDays(k, -(days - 1)), k);
+  const lvl = m => PK.muscleLevel(sets[m] / (days / 7));
+  const f = activeFocus(), lt = PK.leastTrained(S.sessions, BODY, k, 28);
+  let focusHtml = '';
+  if (f) focusHtml = `<div class="focus-box">${icon('target')}<div><b>${esc(t('focusNote', { muscle: areaName(f.muscle), w: PK.focusWeek(f, k), n: f.weeks }))}</b><small>${esc(t('focusAdds', { name: exName(f.ex) }))}</small></div><button class="btn small ghost" data-act="focus-end">${esc(t('focusEnd'))}</button></div>`;
+  else if (!lt.enough) focusHtml = `<p class="muted small">${esc(t('leastWait'))}</p>`;
+  else if (lt.list.length) focusHtml = `<div class="least"><p class="small">${esc(t('leastLine', { list: lt.list.map(m => `${areaName(m).toLowerCase()} (${n1(lt.sets[m])})`).join(', ') }))}</p>
+      <div class="row2"><button class="btn small" data-act="focus-start" data-id="${lt.list[0]}">${icon('target')}${esc(t('focusOn', { muscle: areaName(lt.list[0]).toLowerCase() }))}</button><button class="btn small ghost" data-act="coach-ask" data-q="${esc(t('qLeast'))}">${icon('chat')}${esc(t('askCoach'))}</button></div></div>`;
+  else focusHtml = `<p class="muted small">${esc(t('leastNone'))}</p>`;
+  const sw = i => `<i class="sw lv${i}"></i>`;
+  return `<section class="card body-card"><div class="card-head"><h2>${esc(t('bodyMap'))}</h2><div class="seg small">${[7, 28].map(v => `<button data-act="bm-range" data-v="${v}" aria-pressed="${days === v}">${esc(t(v === 7 ? 'last7d' : 'last4w'))}</button>`).join('')}</div></div>
+    ${bodySvg(lvl)}
+    <div class="bm-legend"><span>${sw(0)}${sw(1)}${sw(2)}${sw(3)}${sw(4)}${sw(5)} ${esc(t('setsPerWeek'))}</span><span><i class="sw inj-ease"></i>${esc(t('injEase'))}</span><span><i class="sw inj-avoid"></i>${esc(t('injAvoid'))}</span></div>
+    ${S.injuries.length ? `<div class="chips wrap inj-chips">${S.injuries.map(x => `<button class="chip-btn inj ${x.level}" data-act="area" data-id="${x.area}">${esc(injuryName(x))} · ${esc(t(x.level === 'avoid' ? 'injAvoid' : 'injEase'))}</button>`).join('')}</div>` : ''}
+    <div class="row2"><button class="btn small" data-act="injuries">${icon('flag')}${esc(t('markInjury'))}</button><button class="btn small ghost" data-act="pick">${icon('go')}${esc(t('buildWorkout'))}</button></div>
+    ${focusHtml}
+    <p class="muted small">${esc(t('bodyMapNote'))}</p></section>`;
+}
+function rankText(r) {
+  if (r.streak) {
+    const parts = [t('streakN', { n: r.streak, w: weeksWord(r.streak) })];
+    if (r.atRisk) parts.push(t('keepStreak'));
+    else if (r.next) parts.push(t('nextRank', { rank: t('rank_' + r.next.id), n: r.next.need, w: weeksWord(r.next.need) }));
+    return parts.join(' · ');
+  }
+  if (r.thisWeek > 0) return t('thisWeekSets', { n: n1(r.thisWeek), need: PK.RANK_SETS });
+  return r.ever ? t('bestStreak', { n: r.best, w: weeksWord(r.best) }) : t('notTrained');
+}
+function ranksCard(k) {
+  const R = PK.muscleRanks(S.sessions, BODY, k);
+  const rows = BODY.muscleIds.slice().sort((a, b) => R[b].streak - R[a].streak || R[b].thisWeek - R[a].thisWeek || BODY.muscleIds.indexOf(a) - BODY.muscleIds.indexOf(b));
+  return `<section class="card"><h2>${esc(t('ranksTitle'))}</h2><p class="muted small">${esc(t('ranksAbout', { n: PK.RANK_SETS }))}</p>
+    <ul class="rank-list">${rows.map(m => { const r = R[m], inj = injuryOf(m); return `<li><button class="rank-row" data-act="area" data-id="${m}">
+      <span class="rk-main"><span class="rk-name">${esc(areaName(m))}${inj ? ` <span class="inj-dot ${inj.level}" title="${esc(t(inj.level === 'avoid' ? 'injAvoid' : 'injEase'))}"></span>` : ''}</span><small>${esc(rankText(r))}</small></span>
+      <span class="rank-badge ${r.rank || 'none'}">${esc(r.rank ? t('rank_' + r.rank) : '–')}</span></button></li>`; }).join('')}</ul></section>`;
 }
 function weeksChart(weeks) {
   const W = 320, H = 150, padL = 30, padB = 22, top = 10, max = Math.max(180, ...weeks.map(w => w.cardioMin));
@@ -655,6 +805,7 @@ function renderProfile() {
       <label class="field"><span>${esc(t('name'))}</span><input id="pf-name" value="${esc(P.name)}" placeholder="${esc(displayName())}" autocomplete="given-name"></label>
       <label class="field"><span>${esc(t('language'))}</span><select id="pf-lang"><option value="en" ${LANG === 'en' ? 'selected' : ''}>English</option><option value="hr" ${LANG === 'hr' ? 'selected' : ''}>Hrvatski</option></select></label>
       ${weightField()}
+      <div class="field"><span>${esc(t('injuriesTitle'))}</span>${S.injuries.length ? `<div class="chips wrap">${S.injuries.map(x => `<button class="chip-btn inj ${x.level}" data-act="area" data-id="${x.area}">${esc(injuryName(x))} · ${esc(t(x.level === 'avoid' ? 'injAvoid' : 'injEase'))}</button>`).join('')}</div>` : `<small class="muted">${esc(t('noInjuries'))}</small>`}<button class="btn small ghost" data-act="injuries" style="margin-top:6px">${icon('flag')}${esc(t('markInjury'))}</button></div>
       <label class="field"><span>${esc(t('notesLabel'))}</span><textarea id="pf-notes" rows="3" maxlength="600" placeholder="${esc(t('notesPlaceholder'))}">${esc(P.notes || '')}</textarea><small class="muted">${esc(t('notesNote'))}</small></label>
     </section>
     <section class="card"><div class="card-head"><h2>${esc(t('readinessTitle'))}</h2>${chip(rState[0], rState[1])}</div>
@@ -681,7 +832,7 @@ function renderProfile() {
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.2 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.3 · ${esc(t('aboutLine'))}</p>`;
 }
 function weightField() {
   const w = weightSource();
@@ -756,12 +907,12 @@ const SHEETS = {
   swap({ i }) {
     const it = S.active && S.active.items[i]; if (!it) return {};
     const ex = EX.byId[it.ex];
-    const opts = [...new Set([it.orig].concat(EX.byId[it.orig].alts || [], ex.alts || []))].filter(x => x !== it.ex && EX.byId[x]);
+    const opts = [...new Set([it.orig].concat(EX.byId[it.orig].alts || [], ex.alts || []))].filter(x => x !== it.ex && EX.byId[x] && PK.injuryHit(x, S.injuries, BODY).level !== 'avoid');
     return { title: t('swapTitle'), sub: tx(ex.name), body: `<p class="muted small">${esc(t('swapNote'))}</p><ul class="pick-list">${opts.map(o => `<li><button class="plan-row" data-act="swap-pick" data-i="${i}" data-id="${o}">
       <span class="thumb">${EX.byId[o].img ? `<img src="img/ex/${o}_0.jpg" alt="">` : icon('go')}</span><span class="plan-main"><span class="plan-name">${esc(exName(o))}</span><span class="plan-meta">${esc(tx(EX.byId[o].muscles))}</span></span></button></li>`).join('')}</ul>` };
   },
   checkin() {
-    return { title: t('checkinTitle'), sub: tx(nextTemplate().name), body: `
+    return { title: t('checkinTitle'), sub: tx(todayTemplate().name), body: `
       <div class="field"><span>${esc(t('sleepQ'))}</span><div class="seg" id="ciSleep"><button data-act="ci" data-k="sleep" data-v="ok" aria-pressed="true">${esc(t('sleepOk'))}</button><button data-act="ci" data-k="sleep" data-v="short" aria-pressed="false">${esc(t('sleepShort'))}</button></div></div>
       <div class="field"><span>${esc(t('painQ'))}</span><div class="seg" id="ciPain"><button data-act="ci" data-k="pain" data-v="no" aria-pressed="true">${esc(t('painNo'))}</button><button data-act="ci" data-k="pain" data-v="yes" aria-pressed="false">${esc(t('painYes'))}</button></div></div>
       <p class="muted small" id="ciNote">${esc(t('checkinNote'))}</p>
@@ -833,6 +984,67 @@ const SHEETS = {
       ${s.items.map(it => { const done = (it.sets || []).filter(x => x.done); if (!done.length) return ''; return `<div class="hist-ex"><h3>${esc(exName(it.ex))}${it.pain >= 4 ? ' ' + chip(it.pain >= 6 ? 'crit' : 'warn', t('pain') + ' ' + it.pain) : ''}</h3>
         <p class="small">${done.map(x => x.mins ? `${x.mins} min` : `${x.kg ? n1(x.kg) + ' kg × ' : ''}${x.reps ?? ''}${x.secs ? x.secs + ' s' : ''}${x.rir != null ? ` @${x.rir}` : ''}`).join(' · ')}</p></div>`; }).join('')}
       <button class="btn ghost block danger" data-act="hist-del" data-id="${s.id}">${icon('trash')}${esc(t('deleteSession'))}</button>` };
+  },
+  area({ id, side }) {
+    const a = BODY.byId[id]; if (!a) return {};
+    const k = today(), inj = injuryOf(id), f = activeFocus();
+    let body = '';
+    if (a.kind === 'muscle') {
+      const s7 = PK.muscleSets(S.sessions, BODY, addDays(k, -6), k)[id], s28 = PK.muscleSets(S.sessions, BODY, addDays(k, -27), k)[id];
+      const r = PK.muscleRanks(S.sessions, BODY, k)[id];
+      const direct = EX.list.filter(e => BODY.EXM[e.id] && BODY.EXM[e.id].p.includes(id)), helps = EX.list.filter(e => BODY.EXM[e.id] && BODY.EXM[e.id].s.includes(id));
+      const exChip = e => { const blocked = PK.injuryHit(e.id, S.injuries, BODY).level === 'avoid'; return `<button class="chip-btn ${blocked ? 'blocked' : ''}" data-act="ex" data-id="${e.id}">${esc(tx(e.name))}</button>`; };
+      body += `<div class="sum-stats"><div><b>${n1(s7)}</b><span>${esc(t('sets7'))}</span></div><div><b>${n1(s28)}</b><span>${esc(t('sets28'))}</span></div><div><b>${r.rank ? esc(t('rank_' + r.rank)) : '–'}</b><span>${esc(t('rankLabel'))}</span></div></div>
+        <p class="small">${esc(rankText(r))}</p>
+        <h3>${esc(t('trainsIt'))}</h3><div class="chips wrap">${direct.map(exChip).join('')}</div>
+        ${helps.length ? `<p class="muted small">${esc(t('alsoHelps'))}: ${esc(helps.map(e => tx(e.name)).join(', '))}</p>` : ''}
+        <div class="row2"><button class="btn" data-act="wk-build-m" data-id="${id}">${icon('go')}${esc(t('buildSession'))}</button>
+        ${f && f.muscle === id ? `<button class="btn ghost" data-act="focus-end">${esc(t('focusEnd'))}</button>` : `<button class="btn ghost" data-act="focus-start" data-id="${id}">${icon('target')}${esc(t('focus3w'))}</button>`}</div>
+        ${f && f.muscle === id ? `<p class="small focus-note">${icon('target')}${esc(t('focusNote', { muscle: areaName(id), w: PK.focusWeek(f, k), n: f.weeks }))}</p>` : ''}`;
+    }
+    const paired = BODY.SHAPES.some(sh => sh.a === id && (sh.side === 'L' || sh.side === 'R'));
+    const lv = inj ? inj.level : 'none';
+    const np = inj ? planFor(todayTemplate(), false) : null;
+    const affected = np ? np.filter(x => x.item.inj && x.item.inj.areas.includes(id)) : [];
+    const skipped = np ? (np.skipped || []).filter(x => x.areas.includes(id)) : [];
+    body += `<div class="inj-box ${lv}"><h3>${icon('flag')}${esc(t('injuryTitle'))}</h3>
+      <div class="seg">${['none', 'ease', 'avoid'].map(v => `<button data-act="inj-level" data-id="${id}" data-side="${esc(side || '')}" data-v="${v}" aria-pressed="${lv === v}">${esc(t(v === 'none' ? 'injNone' : v === 'ease' ? 'injEase' : 'injAvoid'))}</button>`).join('')}</div>
+      ${inj && paired ? `<div class="field"><span>${esc(t('whichSide'))}</span><div class="seg small">${['L', 'R', 'both'].map(v => `<button data-act="inj-side" data-id="${id}" data-v="${v}" aria-pressed="${(inj.side || 'both') === v}">${esc(v === 'both' ? t('sideBoth') : sideWord(v))}</button>`).join('')}</div></div>` : ''}
+      <p class="small">${esc(t(lv === 'ease' ? 'injEaseHow' : lv === 'avoid' ? 'injAvoidHow' : 'injNoneHow'))}</p>
+      ${inj ? `<label class="field"><span>${esc(t('injNoteLabel'))}</span><input id="inj-note" data-id="${id}" maxlength="120" value="${esc(inj.note || '')}" placeholder="${esc(t('injNotePh'))}"><small class="muted">${esc(t('injSince', { date: shortDate(inj.since) }))}</small></label>` : ''}
+      ${affected.length || skipped.length ? `<p class="small"><b>${esc(t('injNextSession', { name: tx(todayTemplate().name) }))}</b></p><ul class="small inj-list">${affected.map(x => `<li>${esc(x.item.inj.how === 'swap' ? `${exName(x.item.inj.from)} → ${tx(x.ex.name)}` : `${tx(x.ex.name)}: ${t('lighter')}`)}</li>`).join('')}${skipped.map(x => `<li>${esc(exName(x.ex))}: ${esc(t('leftOut'))}</li>`).join('')}</ul>` : ''}
+      ${inj ? `<p class="banner info">${icon('info')}${esc(t('injSeeDoc'))}</p>` : ''}</div>`;
+    return { title: tx(a), sub: a.kind === 'muscle' ? t('muscleSub') : t('jointSub'), body };
+  },
+  injuries({ suggest }) {
+    const tag = suggest && BODY.EXM[suggest];
+    const sug = tag ? [...new Set(tag.p.concat(tag.j))] : [];
+    const chipA = id => { const inj = injuryOf(id); return `<button class="chip-btn ${inj ? 'inj ' + inj.level : ''}" data-act="area" data-id="${id}">${esc(areaName(id))}</button>`; };
+    return { title: t('injuriesTitle'), sub: t('injuriesSub'), body: `
+      ${S.injuries.length ? `<ul class="pick-list">${S.injuries.map(x => `<li class="inj-row ${x.level}"><button class="plan-row" data-act="area" data-id="${x.area}"><span class="plan-main"><span class="plan-name">${esc(injuryName(x))}</span><span class="plan-meta">${esc(t(x.level === 'avoid' ? 'injAvoid' : 'injEase'))} · ${esc(t('injSince', { date: shortDate(x.since) }))}${x.note ? ' · ' + esc(x.note) : ''}</span></span></button><button class="btn small ghost" data-act="inj-heal" data-id="${x.area}">${icon('check')}${esc(t('healed'))}</button></li>`).join('')}</ul>` : `<p class="muted small">${esc(t('noInjuries'))}</p>`}
+      ${sug.length ? `<h3>${esc(t('fromExercise', { name: exName(suggest) }))}</h3><div class="chips wrap">${sug.map(chipA).join('')}</div>` : ''}
+      <h3>${esc(t('joints'))}</h3><div class="chips wrap">${['neck', 'shoulders', 'elbow', 'wrist', 'lower_back', 'hip', 'knee', 'ankle'].map(chipA).join('')}</div>
+      <h3>${esc(t('muscles'))}</h3><div class="chips wrap">${BODY.muscleIds.filter(m => m !== 'shoulders' && m !== 'lower_back').map(chipA).join('')}</div>
+      <p class="muted small">${esc(t('injSeeDoc'))}</p>` };
+  },
+  pick() {
+    const nt = nextTemplate(), planned = todayTemplate().custom;
+    return { title: t('pickTitle'), sub: t('pickSub'), body: `
+      <ul class="pick-list"><li><button class="plan-row" data-act="plan-clear"><span class="thumb">${icon('go')}</span><span class="plan-main"><span class="plan-name">${esc(tx(nt.name))}</span><span class="plan-meta">${esc(t('nextInProgramme', { name: tx(program().name) }))}${planned ? '' : ' · ' + esc(t('chosen'))}</span></span></button></li></ul>
+      <h3>${esc(t('buildTitle'))}</h3><p class="muted small">${esc(t('buildAbout'))}</p>
+      <div class="chips wrap">${BODY.GROUPS.map(g => `<button class="chip-btn" data-act="wk-build" data-id="${g.id}">${esc(tx(g))}</button>`).join('')}</div>
+      <button class="btn small ghost" data-act="coach" data-q="${esc(t('qBuild'))}">${icon('chat')}${esc(t('askCoachBuild'))}</button>
+      <h3>${esc(t('savedWorkouts'))}</h3>
+      ${S.workouts.length ? `<ul class="pick-list">${S.workouts.map(w => `<li class="saved-row"><button class="plan-row" data-act="wks-open" data-id="${w.id}"><span class="plan-main"><span class="plan-name">${esc(tx(w.title) || t('wkUntitled'))}</span><span class="plan-meta">${esc(w.items.map(i => exName(i.ex)).join(', '))}</span></span></button></li>`).join('')}</ul>` : `<p class="muted small">${esc(t('savedNone'))}</p>`}` };
+  },
+  wk() {
+    const w = U.draftW; if (!w) return {};
+    const plan = planFor({ custom: true, key: 'X', name: w.title, items: w.items }, false);
+    const saved = w.savedId && S.workouts.some(x => x.id === w.savedId);
+    return { title: tx(w.title) || t('wkUntitled'), sub: t(w.src === 'saved' ? 'wkSavedSub' : 'wkBuiltSub'), body: `${planList(plan)}
+      <p class="muted small">${esc(t('wkNumbers'))}</p>
+      <button class="btn primary block" data-act="wkd-use">${icon('go')}${esc(t('useToday'))}</button>
+      <div class="row2">${saved ? `<button class="btn ghost danger" data-act="wkd-del">${icon('trash')}${esc(t('delete'))}</button>` : `<button class="btn" data-act="wkd-save">${icon('plus')}${esc(t('saveWorkout'))}</button>`}<button class="btn ghost" data-act="sheet-close">${esc(t('close'))}</button></div>` };
   },
   confirm({ msg, yes, act, id }) { return { title: t('sure'), body: `<p>${esc(msg)}</p><div class="row2"><button class="btn danger-solid" data-act="${act}" data-id="${esc(id || '')}">${esc(yes)}</button><button class="btn ghost" data-act="sheet-close">${esc(t('cancel'))}</button></div>` }; }
 };
@@ -965,7 +1177,7 @@ function openCoach(prefill) {
   setTab('coach');
   setTimeout(() => { const i = $('#coachInput'); if (i && prefill) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 80);
 }
-const COACH_CHIPS = ['qProgress', 'qBack', 'qPreGym', 'qSore', 'qCold', 'qShort'];
+const COACH_CHIPS = ['qProgress', 'qBuild', 'qLeast', 'qBack', 'qPreGym', 'qSore', 'qShort'];
 function renderCoach() {
   const el = $('#view-coach');
   const src = AIC.source();
@@ -997,7 +1209,7 @@ function renderCoach() {
       const links = r.links.map(l => l.kind === 'lesson'
         ? `<button class="chip-btn" data-act="lesson" data-id="${l.id}">${icon('book')}${esc(t('lessonN', { n: +l.id.slice(1) }))}: ${esc(tx(LS.byId[l.id].title))}</button>`
         : `<button class="chip-btn" data-act="ex" data-id="${l.id}">${esc(exName(l.id))}</button>`).join('');
-      html += `<div class="msg coach"><div class="bubble">${r.html}${links ? `<div class="chips wrap">${links}</div>` : ''}${m.via ? `<div class="via">${esc(m.via)}</div>` : ''}</div></div>`;
+      html += `<div class="msg coach"><div class="bubble">${r.html}${links ? `<div class="chips wrap">${links}</div>` : ''}${m.via ? `<div class="via">${esc(m.via)}</div>` : ''}</div></div>${(m.cards || []).map((c, ci) => coachCard(c, m.at, ci)).join('')}`;
     } else html += `<div class="msg err"><div class="bubble">${icon('alert')}${esc(m.text)}</div></div>`;
   });
   if (U.coachBusy) html += `<div class="msg coach"><div class="bubble thinking"><span class="dots3"><i></i><i></i><i></i></span>${esc(t('thinking'))}<button class="btn small ghost" data-act="coach-stop">${esc(t('stop'))}</button></div></div>`;
@@ -1005,14 +1217,53 @@ function renderCoach() {
   $('#coachMsgs').innerHTML = html;
   const send = $('#coachSend'); if (send) send.disabled = !!U.coachBusy;
 }
+/* Cards under a coach answer: a workout (Use today / Save) or a focus block (Start). */
+function coachCard(c, at, ci) {
+  const btn = (act, cls, label, ic) => `<button class="btn small ${cls}" data-act="${act}" data-at="${at}" data-ci="${ci}">${ic ? icon(ic) : ''}${esc(label)}</button>`;
+  if (c.type === 'workout-bad') return `<div class="wk-card"><p class="small">${esc(t('wkBad'))}</p><button class="btn small" data-act="pick">${icon('go')}${esc(t('buildWorkout'))}</button></div>`;
+  if (c.type === 'focus') {
+    const cur = activeFocus();
+    return `<div class="wk-card focus"><div class="eyebrow">${esc(t('focusBlock'))}</div><h3>${icon('target')}${esc(areaName(c.muscle))} · ${c.weeks} ${esc(weeksWord(c.weeks))}</h3><p class="small">${esc(t('focusAdds', { name: exName(c.ex) }))}</p>
+      ${cur && !c.started && cur.muscle !== c.muscle ? `<p class="muted small">${esc(t('focusReplaces', { muscle: areaName(cur.muscle) }))}</p>` : ''}
+      <div class="row2">${c.started ? chip('good', t('focusStartedShort')) : cur && cur.muscle === c.muscle ? chip('good', t('focusRunning')) : btn('fb-start', 'primary', t('focusStartBtn'), 'target')}</div></div>`;
+  }
+  const plan = planFor({ custom: true, key: 'X', name: c.title, items: c.items }, false);
+  return `<div class="wk-card"><div class="eyebrow">${esc(t(c.fallback ? 'wkByApp' : 'wkByCoach'))}</div><h3>${esc(tx(c.title) || t('wkUntitled'))}</h3>${planList(plan)}
+    ${c.dropped && c.dropped.length ? `<p class="small inj-text">${icon('alert')}${esc(t('wkDropped', { names: c.dropped.map(d => exName(d.id)).join(', '), area: areasText([...new Set(c.dropped.flatMap(d => d.areas || []))]) }))}</p>` : ''}
+    <div class="row2">${c.used === today() ? chip('good', t('plannedToday')) : btn('wk-use', 'primary', t('useToday'), 'go')}${c.saved ? chip('good', t('savedChip')) : btn('wk-save', '', t('saveWorkout'), 'plus')}</div></div>`;
+}
+/* Turns the blocks in an answer into cards. A broken workout block falls back to the app's own builder
+   when the question names a muscle group ("back workout"). */
+function coachCards(text, q) {
+  const bl = COACH.extractBlocks(text), cards = [], ctx = bctx();
+  if (bl.workout != null) {
+    const v = bl.workout !== 'bad' ? PK.validateWorkout(bl.workout, ctx) : { ok: false };
+    if (v.ok) cards.push({ type: 'workout', title: v.title || both('wkFromCoach', {}, {}), items: v.items, dropped: v.dropped.filter(d => d.why === 'injury') });
+    else {
+      const g = PK.groupsIn(q, BODY);
+      if (g.length) cards.push({ type: 'workout', title: groupTitle(g), items: PK.buildWorkout([...new Set(g.flatMap(id => BODY.groupById[id].m))], ctx, g.length > 1 || g.includes('full') || g.includes('upper') ? 6 : 5), fallback: true });
+      else cards.push({ type: 'workout-bad' });
+    }
+  }
+  if (bl.focus != null && bl.focus !== 'bad') { const f = PK.validateFocus(bl.focus, ctx); if (f) cards.push(Object.assign({ type: 'focus' }, f)); }
+  return cards;
+}
+function coachCardAct(act, at, ci) {
+  const m = S.coach.msgs.find(x => x.at === at), c = m && m.cards && m.cards[ci]; if (!c) return;
+  if (act === 'wk-use') { planWorkout(c); c.used = today(); toast(t('plannedToast'), { label: t('view'), fn: () => setTab('today') }); }
+  else if (act === 'wk-save') { saveWorkout(c); c.saved = true; toast(t('savedWorkoutToast')); }
+  else if (act === 'fb-start') { if (startFocus(c.muscle, c.weeks)) c.started = true; }
+  persist(); renderCoach();
+}
 function scrollCoachEnd() { requestAnimationFrame(() => { const c = $('#coachMsgs'); if (c && c.lastElementChild) c.lastElementChild.scrollIntoView({ block: 'end', behavior: 'smooth' }); }); }
 async function askCoach(q) {
   q = String(q || '').trim(); if (!q || U.coachBusy) return;
   const emergency = AIX.isEmergency(q);
-  const tpl = nextTemplate();
+  const tpl = todayTemplate();
   const { prompt } = COACH.buildPrompt(S, {
-    today: today(), appLang: LANG, question: q, EX, LS, PR, lessonDone, weight: weightSource(),
-    nextTemplate: canGym() ? { name: tpl.name, items: planFor(tpl, false).map(x => ({ ex: x.ex, text: targetText(x.ex, x.item, x.target) })) } : null
+    today: today(), appLang: LANG, question: q, EX, LS, PR, B: BODY, lessonDone, weight: weightSource(),
+    nextTemplate: canGym() ? { name: tpl.name, items: planFor(tpl, false).map(x => ({ ex: x.ex, text: targetText(x.ex, x.item, x.target)
+      + (x.item.inj ? ` (${x.item.inj.how === 'swap' ? 'in place of ' + x.item.inj.from : 'eased off'} for ${x.item.inj.areas.join(', ')})` : '') + (x.item.focus ? ' (focus block)' : '') })) } : null
   });
   S.coach.msgs.push({ role: 'user', text: q, at: Date.now(), emergency });
   U.coachDraft = ''; const inp = $('#coachInput'); if (inp) inp.value = '';
@@ -1020,8 +1271,9 @@ async function askCoach(q) {
   const ctl = new AbortController(); U.coachBusy = { ctl };
   persist(); renderCoach(); scrollCoachEnd();
   try {
-    const r = await AIC.text(prompt, { signal: ctl.signal, maxTokens: 1200, temperature: 0.3 });
-    S.coach.msgs.push({ role: 'coach', text: r.text, at: Date.now(), via: r.via });
+    const r = await AIC.text(prompt, { signal: ctl.signal, maxTokens: 1400, temperature: 0.3 });
+    const cards = coachCards(r.text, q);
+    S.coach.msgs.push({ role: 'coach', text: r.text, at: Date.now(), via: r.via, cards: cards.length ? cards : undefined });
     if (r.claudeErr === 'claude_key' || r.claudeErr === 'claude_credits') toast(t(r.claudeErr === 'claude_key' ? 'aiClaudeKey' : 'aiClaudeCredits'));
   } catch (e) {
     if (!e || e.code !== 'cancelled') S.coach.msgs.push({ role: 'err', text: aiErr(e), at: Date.now() });
@@ -1112,6 +1364,23 @@ function handleAct(act, b) {
     case 'coach-clear-yes': S.coach.msgs = []; persist(); closeAllSheets(); renderCoach(); break;
     case 'reload': location.reload(); break;
     case 'go': if (S.active) setTab('train'); else startSession(); break;
+    case 'bm-range': U.bmDays = +b.dataset.v === 28 ? 28 : 7; scheduleRender(); break;
+    case 'area': { const top = U.sheets[U.sheets.length - 1]; openSheet('area', { id, side: b.dataset.side || '' }, top && top.kind === 'area'); break; }
+    case 'injuries': openSheet('injuries', { suggest: id || '' }); break;
+    case 'inj-level': setInjury(id, b.dataset.v, b.dataset.side); break;
+    case 'inj-side': { const inj = injuryOf(id); if (inj) { inj.side = b.dataset.v; persist(); scheduleRender(); renderSheet(); } break; }
+    case 'inj-heal': S.injuries = S.injuries.filter(x => x.area !== id); persist(); scheduleRender(); renderSheet(); toast(t('injHealed', { area: areaName(id) })); break;
+    case 'focus-start': startFocus(id); break;
+    case 'focus-end': S.focus = null; persist(); scheduleRender(); if (U.sheets.length) renderSheet(); toast(t('focusEnded')); break;
+    case 'pick': openSheet('pick'); break;
+    case 'plan-clear': S.planned = null; persist(); closeAllSheets(); scheduleRender(); break;
+    case 'wk-build': { const g = BODY.groupById[id]; if (!g) break; U.draftW = { title: groupTitle([id]), items: PK.buildWorkout(g.m, bctx(), id === 'full' || id === 'upper' ? 6 : 5), src: 'built' }; openSheet('wk'); break; }
+    case 'wk-build-m': { const m = BODY.byId[id]; if (!m) break; U.draftW = { title: both('wkTitle', { g: m.en }, { g: m.hr.toLowerCase() }), items: PK.buildWorkout([id], bctx(), 5), src: 'built' }; openSheet('wk'); break; }
+    case 'wks-open': { const w = S.workouts.find(x => x.id === id); if (!w) break; U.draftW = { title: w.title, items: clone(w.items), src: 'saved', savedId: w.id }; openSheet('wk'); break; }
+    case 'wkd-use': if (U.draftW) { planWorkout(U.draftW); closeAllSheets(); setTab('today'); toast(t('plannedToast')); } break;
+    case 'wkd-save': if (U.draftW) { const c = saveWorkout(U.draftW); U.draftW.savedId = c.id; renderSheet(); toast(t('savedWorkoutToast')); } break;
+    case 'wkd-del': if (U.draftW && U.draftW.savedId) { S.workouts = S.workouts.filter(x => x.id !== U.draftW.savedId); persist(); closeSheet(); toast(t('deleted')); } break;
+    case 'wk-use': case 'wk-save': case 'fb-start': coachCardAct(act, +b.dataset.at, +b.dataset.ci); break;
     case 'start': startSession(); break;
     case 'lang': setLang(LANG === 'hr' ? 'en' : 'hr'); break;
     case 'sheet-close': closeSheet(); break;
@@ -1212,6 +1481,7 @@ function bindEvents() {
     switch (el.id) {
       case 'pf-name': S.profile.name = el.value.trim().slice(0, 40); persist(); break;
       case 'pf-notes': S.profile.notes = el.value.trim().slice(0, 600); persist(); break;
+      case 'inj-note': { const inj = injuryOf(el.dataset.id); if (inj) { inj.note = el.value.trim().slice(0, 120); persist(); } break; }
       case 'pf-lang': setLang(el.value); break;
       case 'pf-kg': { const v = num(el.value); S.profile.kg = v && v > 30 && v < 350 ? v : null; persist(); break; }
       case 'pf-rest': S.profile.restSec = +el.value; persist(); break;
