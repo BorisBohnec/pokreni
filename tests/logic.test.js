@@ -154,6 +154,7 @@ test('i18n: English and Croatian have the same keys, and every key the app uses 
   PK.READINESS_QS.forEach(q => dynamic.push('rq_' + q));
   ['green', 'yellow', 'red', 'emergency'].forEach(z => dynamic.push('z_' + z));
   ['start', 'bronze', 'silver', 'gold', 'diamond'].forEach(r => dynamic.push('rank_' + r));
+  ['media_draw', 'media_photo', 'media_video', 'changeVideo', 'addVideo', 'tagToday', 'tagAdded', 'addedToast', 'addedAlwaysToast', 'addedLiveToast', 'tabCoach'].forEach(k => dynamic.push(k));
   ['injNone', 'injEase', 'injAvoid', 'injNoneHow', 'injEaseHow', 'injAvoidHow', 'last7d', 'last4w', 'front', 'backView', 'wkByApp', 'wkByCoach', 'wkSavedSub', 'wkBuiltSub', 'weekOne', 'weekFew', 'weekMany', 'wkTitle', 'wkFromCoach'].forEach(k => dynamic.push(k));
   ['painFine', 'painMeh', 'painSharp', 'easier', 'harder', 'tRestHr', 'tWaist', 'tWalk', 'tChair', 'tPush', 'tPlank'].forEach(k => dynamic.push(k));
   ['tRestHr', 'tWaist', 'tWalk', 'tChair', 'tPush', 'tPlank'].forEach(k => dynamic.push(k + 'How'));

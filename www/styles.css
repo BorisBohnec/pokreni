@@ -23,6 +23,7 @@
   --r:18px; --r-sm:11px;
   --bm-sil:#E7EDF5; --bm0:#D2DCE9; --bm1:#CFE2F8; --bm2:#A6C9F1; --bm3:#71A8E7; --bm4:#3680D6; --bm5:#1A55AD; --bm-joint:#9DB0C7;
   --inj:#D23B3B; --inj-soft:#F9D7D5;
+  --fig-far:#9AAAC0; --fig-frame:#7D8DA5; --fig-pad:#C4D3E6; --fig-prop:#AFC0D6;
   --sat:var(--safe-area-inset-top,env(safe-area-inset-top,0px)); --sab:var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px));
   color-scheme:light;
 }
@@ -35,6 +36,7 @@
     --scrim:rgba(0,0,0,.62); --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
     --bm-sil:#162131; --bm0:#24324A; --bm1:#1D3A5D; --bm2:#245384; --bm3:#2F70B6; --bm4:#4F95E4; --bm5:#98C6F8; --bm-joint:#5A6B83;
     --inj:#F06262; --inj-soft:#4A2224;
+    --fig-far:#56657C; --fig-frame:#6D7D95; --fig-pad:#33445C; --fig-prop:#3A4A60;
     color-scheme:dark;
   }
 }
@@ -63,6 +65,10 @@ a{color:var(--accent)}
 .brand .chev.two{opacity:.7}
 .brand-name{font:800 22px/1 var(--f-display);font-stretch:108%;letter-spacing:-.01em;color:var(--ink)}
 .brand-name b{font-weight:900;color:var(--accent)}
+.top-actions{display:flex;align-items:center;gap:8px}
+.top-btn{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:var(--surface);border:1px solid var(--line);color:var(--ink-2)}
+.top-btn .ic{width:19px;height:19px}
+.top-btn[aria-current="page"]{color:var(--accent);border-color:var(--accent);background:var(--accent-wash)}
 .lang-btn{font:700 12.5px var(--f-body);letter-spacing:.06em;padding:7px 11px;border-radius:99px;background:var(--surface);border:1px solid var(--line);color:var(--ink-2)}
 
 /* views */
@@ -432,3 +438,41 @@ body.resting .app{padding-bottom:calc(190px + var(--sab))}
 .wk-card .plan{margin:0 0 6px}
 .wk-card .row2{margin-top:6px}
 .wk-card .status{align-self:center}
+
+/* ---------- adding exercises ---------- */
+.add-tag{display:inline-block;font:700 10px/1.5 var(--f-body);text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);background:var(--surface-2);padding:1px 6px;border-radius:6px;vertical-align:2px}
+.plan li.has-x{display:flex;align-items:center;gap:4px}
+.plan li.has-x .plan-row{flex:1;min-width:0}
+.row-x{flex:none;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;color:var(--muted)}
+.row-x .ic{width:18px;height:18px}
+.row-x:active{background:var(--surface-2)}
+.add-bar{position:sticky;top:0;z-index:2;background:var(--surface);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);border-radius:var(--r-sm);padding:10px 12px;margin:8px 0 10px;box-shadow:var(--shadow)}
+.add-bar-name{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.add-bar-name .ic{color:var(--accent);width:18px;height:18px}
+.plan-row.picked{background:var(--accent-wash);border-radius:var(--r-sm)}
+.plan-row:disabled{opacity:.55}
+.plan-row .pick-ic{color:var(--accent);flex:none}
+.chip-btn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.add-live{margin:4px 0 12px}
+
+/* ---------- exercise media: drawing, photos, video ---------- */
+.ex-media{margin:0 0 12px}
+.media-tabs{margin:0 0 8px}
+.media-box{position:relative;border-radius:var(--r-sm);overflow:hidden;background:var(--surface-2);aspect-ratio:13/10}
+.media-box.video{aspect-ratio:16/9;background:#000}
+.media-box iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.media-box.photo{background:#fff}
+.media-box.photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.media-box.photo img.b{animation:exflip 3.2s ease-in-out infinite}
+@keyframes exflip{0%,38%{opacity:0}50%,88%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion: reduce){.media-box.photo img.b{animation:none;opacity:0}}
+.media-box.note{display:grid;place-items:center;aspect-ratio:16/7;padding:16px;text-align:center;color:var(--muted)}
+.media-box svg.move{position:absolute;inset:0;width:100%;height:100%;display:block}
+.media-foot{margin:6px 2px 0}
+.media-foot a{color:var(--accent);font-weight:600}
+.vid-edit{margin-top:6px;display:flex;flex-direction:column;gap:6px}
+.fg-near,.fg-far,.fg-frame,.fg-floor,.fg-cable,.fg-handle{stroke-linecap:round;fill:none}
+.fg-near{stroke:var(--ink)} .fg-far{stroke:var(--fig-far)} .fg-head{fill:var(--ink)} .fg-hand{fill:var(--ink)} .fg-hand-far{fill:var(--fig-far)}
+.fg-floor{stroke:var(--line);stroke-width:3} .fg-prop{fill:var(--surface);stroke:var(--fig-prop);stroke-width:2}
+.fg-frame{stroke:var(--fig-frame)} .fg-weight{fill:var(--accent)} .fg-hole{fill:var(--surface-2)} .fg-handle{stroke:var(--ink-2);stroke-width:4}
+.fg-cable{stroke:var(--fig-frame);stroke-width:2} .fg-pulley{fill:var(--surface);stroke:var(--fig-frame);stroke-width:2.5} .fg-grip{fill:var(--accent)} .fg-pad{fill:var(--fig-pad)}

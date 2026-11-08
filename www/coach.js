@@ -76,7 +76,7 @@
     if (tp.height) who.push(`${tp.height} cm`);
     if (o.weight) who.push(`${r1(o.weight.kg)} kg (${o.weight.src === 'tanjur' ? 'from Tanjur' : o.weight.src === 'hc' ? 'from Health Connect' : 'typed in'}${o.weight.date ? ', ' + o.weight.date : ''})`);
     if (tp.goal) who.push(`weight goal in Tanjur: ${tp.goal}`);
-    L.push(`Person: ${who.join(', ') || 'no profile details'}. Beginner who started training recently; works an office job (gym after work).`);
+    L.push(`Person: ${who.join(', ') || 'no profile details'}. Only their own notes (if any, next line) tell you about their body, health, job or flexibility; don't assume anything else.`);
     const notes = String((D.profile && D.profile.notes) || '').trim();
     if (notes) L.push(`What they told the app about their body and health: "${notes.slice(0, 600)}"`);
 

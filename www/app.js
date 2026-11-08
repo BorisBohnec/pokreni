@@ -1,7 +1,7 @@
 /* PoKreni: learn to train safely and log gym sessions. Plain JS, no build step. Pairs with Tanjur through Health Connect. */
 (function () {
 'use strict';
-const PK = window.PK, EX = window.PK_EXERCISES, PR = window.PK_PROGRAMS, LS = window.PK_LESSONS, I18N = window.PK_I18N, AIX = window.PK_AI, COACH = window.PK_COACH, BODY = window.PK_BODY;
+const PK = window.PK, EX = window.PK_EXERCISES, PR = window.PK_PROGRAMS, LS = window.PK_LESSONS, I18N = window.PK_I18N, AIX = window.PK_AI, COACH = window.PK_COACH, BODY = window.PK_BODY, MOVES = window.PK_MOVES || {}, VIDEOS = window.PK_VIDEOS || {}, ANIM = window.PK_ANIM;
 const { dkey, addDays, parseKey, weekStart, clamp, num, daysBetween } = PK;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -94,11 +94,11 @@ const S = {
   settings: { health: { on: false }, remind: { on: false, time: '16:30' } },
   hc: { weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, syncedAt: 0, granted: [] },
   tanjur: null, coach: { msgs: [] }, aiUsage: null,
-  injuries: [], focus: null, workouts: [], planned: null,
+  injuries: [], focus: null, workouts: [], planned: null, extras: {}, todayExtra: null,
   savedAt: 0
 };
 const U = { tab: 'today', rest: null, tick: 0, sheets: [], hcBusy: false, tanjur: null, tjState: '', tjAt: 0, gradDismissed: false,
-  ai: null, tjUsage: null, coachBusy: null, coachDraft: '', coachLang: '', bmDays: 7, draftW: null };
+  ai: null, tjUsage: null, coachBusy: null, coachDraft: '', coachLang: '', bmDays: 7, draftW: null, addPick: null, addGroup: 'all', exMedia: 'draw', vidEdit: null };
 
 function applyData(d) {
   if (!d || typeof d !== 'object') return;
@@ -122,13 +122,16 @@ function applyData(d) {
   S.focus = d.focus && BODY.byId[d.focus.muscle] && EX.byId[d.focus.ex] ? d.focus : null;
   S.workouts = Array.isArray(d.workouts) ? d.workouts.filter(w => w && w.id && Array.isArray(w.items) && w.items.every(i => i && EX.byId[i.ex])) : [];
   S.planned = d.planned && d.planned.w && Array.isArray(d.planned.w.items) && d.planned.w.items.every(i => i && EX.byId[i.ex]) ? d.planned : null;
+  const okItems = a => Array.isArray(a) && a.every(i => i && EX.byId[i.ex]);
+  S.extras = {}; if (d.extras && typeof d.extras === 'object') Object.keys(d.extras).forEach(k => { if (okItems(d.extras[k])) S.extras[k] = d.extras[k]; });
+  S.todayExtra = d.todayExtra && okItems(d.todayExtra.items) && PK.isKey(d.todayExtra.date) ? d.todayExtra : null;
   S.savedAt = d.savedAt || 0;
 }
 function snapshot() {
   S.savedAt = Date.now();
   return JSON.stringify({ app: 'pokreni', version: 1, savedAt: S.savedAt, profile: S.profile, readiness: S.readiness, baselines: S.baselines, lessons: S.lessons, quiz: S.quiz,
     program: S.program, lifts: S.lifts, sessions: S.sessions, cardio: S.cardio, active: S.active, settings: S.settings, hc: S.hc, tanjur: S.tanjur, coach: S.coach, aiUsage: S.aiUsage,
-    injuries: S.injuries, focus: S.focus, workouts: S.workouts, planned: S.planned });
+    injuries: S.injuries, focus: S.focus, workouts: S.workouts, planned: S.planned, extras: S.extras, todayExtra: S.todayExtra });
 }
 let saveTimer = 0, saveChain = Promise.resolve(), dirty = false, warned = false;
 function persist() { dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(flushSave, 300); }
@@ -225,9 +228,49 @@ function todayTemplate() {
   if (P && P.date === today() && P.w && P.w.items.length) return { key: 'X', custom: true, id: P.w.id, name: P.w.title, items: P.w.items };
   return nextTemplate();
 }
-/* The session's exercises after a focus block and injuries: { items, skipped }. */
+const extraKey = tpl => program().id + ':' + tpl.key;
+/* Adds an exercise to the session you're doing now, with targets from your history and any injury applied. */
+function addLive(id, keep) {
+  const A = S.active, ex = EX.byId[id]; if (!A || !ex) return;
+  const hit = PK.injuryHit(id, S.injuries, BODY); if (hit.level === 'avoid') return;
+  const item = PK.defaultItem(id, EX, PR); item.added = 'live';
+  if (hit.level === 'ease') { item.ease = true; item.inj = { how: 'ease', areas: hit.areas }; }
+  const tg = PK.target(ex, item, S.lifts[id], { doneInProgram: A.custom ? S.sessions.length : doneInProgram(), lighter: A.lighter || !!item.ease });
+  if (item.ease && tg.kg != null) tg.kg = PK.roundKg(tg.kg * 0.8, ex.step || 2.5);
+  const row = { ex: id, orig: id, item, target: tg, sets: mkSets(ex, item, tg), pain: null, open: true };
+  A.items.forEach(x => { x.open = false; });
+  const at = A.items.findIndex(x => x.item.finisher); A.items.splice(at < 0 ? A.items.length : at, 0, row);
+  if (keep && !A.custom) { const k = program().id + ':' + A.template; S.extras[k] = (S.extras[k] || []).filter(x => x.ex !== id).concat([PK.defaultItem(id, EX, PR)]); }
+  persist(); closeAllSheets(); scheduleRender();
+  toast(t(keep && !A.custom ? 'addedAlwaysToast' : 'addedLiveToast', { name: tx(ex.name), tpl: tx(A.name) }));
+}
+function addToPlan(id, how) {
+  const ex = EX.byId[id]; if (!ex) return;
+  const tpl = todayTemplate(), item = PK.defaultItem(id, EX, PR);
+  if (how === 'always' && !tpl.custom) { const k = extraKey(tpl); S.extras[k] = (S.extras[k] || []).filter(x => x.ex !== id).concat([item]); }
+  else {
+    if (!S.todayExtra || S.todayExtra.date !== today()) S.todayExtra = { date: today(), items: [] };
+    S.todayExtra.items = S.todayExtra.items.filter(x => x.ex !== id).concat([item]);
+  }
+  persist(); closeAllSheets(); scheduleRender();
+  toast(t(how === 'always' && !tpl.custom ? 'addedAlwaysToast' : 'addedToast', { name: tx(ex.name), tpl: tx(tpl.name) }));
+}
+function removeAdded(id, how) {
+  if (how === 'always') { const k = extraKey(todayTemplate()); if (S.extras[k]) S.extras[k] = S.extras[k].filter(x => x.ex !== id); }
+  else if (S.todayExtra) S.todayExtra.items = S.todayExtra.items.filter(x => x.ex !== id);
+  persist(); scheduleRender(); toast(t('removedToast', { name: exName(id) }));
+}
+/* The session's exercises after added ones, a focus block and injuries: { items, skipped }. */
 function sessionItems(tpl) {
   const items = tpl.items.map(i => { const c = clone(i); delete c.ease; delete c.inj; return c; });
+  /* Exercises you added: to every session of this A/B day, or just to today's. They go before the optional finisher. */
+  const addIn = (list, how) => (list || []).forEach(x => {
+    if (!EX.byId[x.ex] || items.some(i => i.ex === x.ex)) return;
+    const c = clone(x); delete c.ease; delete c.inj; c.added = how;
+    const at = items.findIndex(i => i.finisher); items.splice(at < 0 ? items.length : at, 0, c);
+  });
+  if (!tpl.custom) addIn(S.extras[extraKey(tpl)], 'always');
+  if (S.todayExtra && S.todayExtra.date === today()) addIn(S.todayExtra.items, 'today');
   const f = activeFocus();
   if (f && !tpl.custom && !items.some(i => i.ex === f.ex)) {
     const fi = PK.defaultItem(f.ex, EX, PR); fi.sets = 2; fi.focus = true;
@@ -318,8 +361,11 @@ function setTab(tab) {
 function paintChrome() {
   $('#langBtn').textContent = LANG === 'hr' ? 'EN' : 'HR';
   $('#langBtn').setAttribute('aria-label', t('switchLang'));
-  const tabs = [['today', 'home', t('tabToday')], ['learn', 'book', t('tabLearn')], ['progress', 'chart', t('tabProgress')], ['profile', 'user', t('tabProfile')]];
+  const tabs = [['today', 'home', t('tabToday')], ['learn', 'book', t('tabLearn')], ['coach', 'chat', t('tabCoach')], ['progress', 'chart', t('tabProgress')]];
   tabs.forEach(([id, ic, label]) => { const b = $('#tab-' + id); b.innerHTML = icon(ic) + `<span>${esc(label)}</span>`; b.setAttribute('aria-current', U.tab === id ? 'page' : 'false'); });
+  const pb = $('#profileBtn');
+  pb.innerHTML = icon('user'); pb.setAttribute('aria-label', t('tabProfile')); pb.title = t('tabProfile');
+  pb.setAttribute('aria-current', U.tab === 'profile' ? 'page' : 'false');
   const go = $('#tabGo');
   go.innerHTML = icon(S.active ? 'play' : 'go') + `<span>${esc(S.active ? t('resume') : t('train'))}</span>`;
   go.classList.toggle('live', !!S.active);
@@ -365,16 +411,18 @@ function nextSessionCard(d) {
         <span class="pill">${icon('clock')}${esc(t('aboutMin', { m: estMinutes(tpl) }))}</span></div>
       <p class="day-note ${isGym ? 'gym' : ''}">${esc(sub)}</p>
       ${f && !tpl.custom ? `<p class="focus-note">${icon('target')}${esc(t('focusNote', { muscle: areaName(f.muscle), w: PK.focusWeek(f, today()), n: f.weeks }))}</p>` : ''}
-      ${planList(plan)}
+      ${planList(plan, { removable: true })}
       <button class="btn primary block big" data-act="start">${icon('go')}${esc(t('startSession'))}</button>
-      <div class="row2 next-tools"><button class="btn small ghost" data-act="pick">${icon('swap')}${esc(t('otherWorkout'))}</button>${tpl.custom ? `<button class="btn small ghost" data-act="plan-clear">${esc(t('backToPlan', { name: tx(nextTemplate().name) }))}</button>` : ''}</div>
+      <div class="row2 next-tools"><button class="btn small ghost" data-act="add-ex">${icon('plus')}${esc(t('addExercise'))}</button><button class="btn small ghost" data-act="pick">${icon('swap')}${esc(t('otherWorkout'))}</button>${tpl.custom ? `<button class="btn small ghost" data-act="plan-clear">${esc(t('backToPlan', { name: tx(nextTemplate().name) }))}</button>` : ''}</div>
     </section>`;
 }
 /* The exercise list for a planned session, with injury and focus notes. Used on Today and in previews. */
-function planList(plan) {
-  return `<ol class="plan">${plan.map(({ item, ex, target }) => `<li class="${item.finisher ? 'opt' : ''}"><button class="plan-row" data-act="ex" data-id="${ex.id}">
+const addedTag = item => (item.added ? ` <span class="add-tag">${esc(t(item.added === 'today' ? 'tagToday' : 'tagAdded'))}</span>` : '');
+function planList(plan, opts) {
+  const rm = opts && opts.removable;
+  return `<ol class="plan">${plan.map(({ item, ex, target }) => `<li class="${item.finisher ? 'opt' : ''} ${rm && item.added ? 'has-x' : ''}"><button class="plan-row" data-act="ex" data-id="${ex.id}">
         <span class="thumb">${ex.img ? `<img src="img/ex/${ex.id}_0.jpg" alt="" loading="lazy">` : icon(ex.kind === 'cardio' ? 'walk' : 'go')}</span>
-        <span class="plan-main"><span class="plan-name">${esc(tx(ex.name))}${item.finisher ? ` <small>${esc(t('optional'))}</small>` : ''}${item.focus ? ` <span class="focus-tag">${esc(t('focusTag'))}</span>` : ''}</span><span class="plan-meta">${esc(targetText(ex, item, target))}</span>${injNote(item)}</span></button></li>`).join('')}</ol>
+        <span class="plan-main"><span class="plan-name">${esc(tx(ex.name))}${item.finisher ? ` <small>${esc(t('optional'))}</small>` : ''}${item.focus ? ` <span class="focus-tag">${esc(t('focusTag'))}</span>` : ''}${addedTag(item)}</span><span class="plan-meta">${esc(targetText(ex, item, target))}</span>${injNote(item)}</span></button>${rm && item.added ? `<button class="row-x" data-act="add-ex-del" data-id="${ex.id}" data-k="${item.added}" aria-label="${esc(t('removeAdded'))}">${icon('x')}</button>` : ''}</li>`).join('')}</ol>
     ${plan.skipped && plan.skipped.length ? `<p class="banner inj">${icon('alert')}${esc(t('injSkipped', { names: plan.skipped.map(x => exName(x.ex)).join(', '), area: areasText([...new Set(plan.skipped.flatMap(x => x.areas))]) }))}</p>` : ''}`;
 }
 function weekCard(k) {
@@ -418,9 +466,7 @@ function foodCard(k) {
 function renderLearn() {
   const el = $('#view-learn');
   const done = LS.list.filter(l => lessonDone(l.id)).length;
-  let html = `<header class="view-head"><div><div class="eyebrow">${esc(t('lessonsDone', { n: done, total: LS.list.length }))}</div><h1>${esc(t('tabLearn'))}</h1></div></header>
-    <section class="card flags" data-act="redflags" role="button" tabindex="0"><h2>${icon('flag')}${esc(t('redFlags'))}</h2><p>${esc(t('redFlagsShort'))}</p></section>
-    <section class="card coach-card" data-act="coach" role="button" tabindex="0"><div class="coach-card-in">${icon('chat')}<div><h2>${esc(t('coachTitle'))}</h2><p class="muted small">${esc(t('coachCardBody'))}</p></div>${icon('right', 'chev')}</div></section>`;
+  let html = `<header class="view-head"><div><div class="eyebrow">${esc(t('lessonsDone', { n: done, total: LS.list.length }))}</div><h1>${esc(t('tabLearn'))}</h1></div></header>`;
   LS.PHASES.forEach(ph => {
     const ls = LS.list.filter(l => l.phase === ph.n);
     html += `<section class="card phase"><div class="card-head"><h2>${esc(tx(ph.name))}</h2><span class="muted small">${esc(tx(ph.when))}</span></div><ol class="lessons">
@@ -466,6 +512,7 @@ function renderTrain() {
   html += `<section class="card warm"><button class="warm-head" data-act="warm-toggle"><h2>${esc(t('warmup'))}</h2><span class="muted small">${warm.filter(w => A.warmup[w.id]).length}/${warm.length}</span>${icon(A.warmOpen ? 'up' : 'down', 'chev')}</button>
     ${A.warmOpen ? `<ul class="checklist">${warm.map(w => `<li><label><input type="checkbox" data-warm="${w.id}" ${A.warmup[w.id] ? 'checked' : ''}><span>${esc(tx(w))}</span></label></li>`).join('')}</ul>` : ''}</section>`;
   A.items.forEach((it, i) => { html += trainItem(it, i); });
+  html += `<button class="btn ghost block add-live" data-act="add-ex">${icon('plus')}${esc(t('addExercise'))}</button>`;
   html += `<div class="train-foot"><button class="btn primary block big" data-act="finish">${icon('check')}${esc(t('finishSession'))}</button>
     <button class="btn ghost block" data-act="discard">${esc(t('discardSession'))}</button></div>`;
   el.innerHTML = html;
@@ -476,7 +523,7 @@ function trainItem(it, i) {
   const complete = done === all;
   const head = `<button class="ti-head" data-act="ti-toggle" data-i="${i}">
       <span class="thumb">${ex.img ? `<img src="img/ex/${ex.id}_0.jpg" alt="" loading="lazy">` : icon(ex.kind === 'cardio' ? 'walk' : 'go')}</span>
-      <span class="ti-main"><span class="ti-name">${esc(tx(ex.name))}${item.finisher ? ` <small>${esc(t('optional'))}</small>` : ''}${item.focus ? ` <span class="focus-tag">${esc(t('focusTag'))}</span>` : ''}</span><span class="ti-meta">${esc(targetText(ex, item, it.target))}</span></span>
+      <span class="ti-main"><span class="ti-name">${esc(tx(ex.name))}${item.finisher ? ` <small>${esc(t('optional'))}</small>` : ''}${item.focus ? ` <span class="focus-tag">${esc(t('focusTag'))}</span>` : ''}${addedTag(item)}</span><span class="ti-meta">${esc(targetText(ex, item, it.target))}</span></span>
       <span class="ti-count ${complete ? 'ok' : ''}">${complete ? icon('check') : `${done}/${all}`}</span></button>`;
   if (!it.open) return `<section class="card ti ${complete ? 'complete' : ''}">${head}</section>`;
   const firstTime = (ex.kind === 'load' || ex.kind === 'carry') && it.target.kg == null && !done;
@@ -832,7 +879,7 @@ function renderProfile() {
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.3 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.4 · ${esc(t('aboutLine'))}</p>`;
 }
 function weightField() {
   const w = weightSource();
@@ -887,12 +934,35 @@ function renderSheet() {
   $('#sheetSub').hidden = !r.sub;
   $('#sheetBack').hidden = U.sheets.length < 2;
   $('#sheetBody').innerHTML = r.body || '';
+  const mv = $('#sheetBody svg.move[data-move]');
+  if (mv && ANIM && MOVES[mv.dataset.move]) ANIM.play(mv, MOVES[mv.dataset.move]);
+}
+const ytId = PK.ytId;
+const videoFor = id => { const own = S.settings.videos && S.settings.videos[id]; return own ? { v: own, own: true } : VIDEOS[id] || null; };
+/* Drawing (offline), the two photos alternating, or the demo video, inside the exercise sheet. */
+function mediaBlock(id) {
+  const ex = EX.byId[id], vid = videoFor(id);
+  const modes = [MOVES[id] && 'draw', ex.img && 'photo', 'video'].filter(Boolean);
+  const m = modes.includes(U.exMedia) ? U.exMedia : modes[0];
+  const tabs = `<div class="seg small media-tabs">${modes.map(x => `<button data-act="ex-media" data-v="${x}" aria-pressed="${m === x}">${esc(t('media_' + x))}</button>`).join('')}</div>`;
+  let box;
+  if (m === 'draw') box = `<div class="media-box draw"><svg class="move" viewBox="0 0 ${ANIM.W} ${ANIM.H}" data-move="${id}" role="img" aria-label="${esc(t('media_draw'))}"></svg></div>`;
+  else if (m === 'photo') box = `<div class="media-box photo"><img src="img/ex/${id}_0.jpg" alt="${esc(t('startPos'))}"><img class="b" src="img/ex/${id}_1.jpg" alt="${esc(t('endPos'))}"></div>`;
+  else if (!vid) box = `<div class="media-box note"><p>${esc(t('videoNone'))}</p></div>`;
+  else if (navigator.onLine === false) box = `<div class="media-box note"><p>${esc(t('videoOffline'))}</p></div>`;
+  else box = `<div class="media-box video"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(vid.v)}?rel=0&modestbranding=1&playsinline=1" title="${esc(tx(ex.name))}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div>`;
+  let foot = '';
+  if (m === 'video') {
+    foot = `<p class="muted small media-foot">${vid && vid.by && !vid.own ? esc(t('videoBy', { by: vid.by })) + ' · ' : ''}${vid ? `<a href="https://www.youtube.com/watch?v=${encodeURIComponent(vid.v)}" target="_blank" rel="noopener">${esc(t('openYoutube'))}</a> · ` : ''}<button class="link" data-act="vid-edit" data-id="${id}">${esc(t(vid ? 'changeVideo' : 'addVideo'))}</button></p>`;
+    if (U.vidEdit === id) foot += `<div class="vid-edit"><input id="vid-url" data-id="${id}" inputmode="url" placeholder="https://youtu.be/…" value="${esc(vid && vid.own ? 'https://youtu.be/' + vid.v : '')}"><div class="row2"><button class="btn small primary" data-act="vid-save" data-id="${id}">${esc(t('save'))}</button>${vid && vid.own ? `<button class="btn small ghost" data-act="vid-reset" data-id="${id}">${esc(t('videoReset'))}</button>` : ''}</div><p class="muted small">${esc(t('videoEditNote'))}</p></div>`;
+  } else if (m === 'draw') foot = `<p class="muted small media-foot">${esc(t('drawNote'))}</p>`;
+  return `<div class="ex-media">${tabs}${box}${foot}</div>`;
 }
 const SHEETS = {
   ex({ id }) {
     const ex = EX.byId[id]; if (!ex) return {};
     const lift = S.lifts[id];
-    const imgs = ex.img ? `<div class="ex-imgs"><img src="img/ex/${id}_0.jpg" alt="${esc(t('startPos'))}"><img src="img/ex/${id}_1.jpg" alt="${esc(t('endPos'))}"></div>` : '';
+    const imgs = mediaBlock(id);
     const rel = [['easier', ex.easier], ['harder', ex.harder]].filter(x => x[1]).map(([k, v]) => `<button class="chip-btn" data-act="ex" data-id="${v}">${esc(t(k))}: ${esc(exName(v))}</button>`).join('');
     const hist = PK.liftHistory(S, id).slice(-6).reverse();
     return { title: tx(ex.name), sub: tx(ex.muscles), body: `${imgs}
@@ -900,7 +970,7 @@ const SHEETS = {
       <h3>${esc(t('howTo'))}</h3><ol class="cues">${tx(ex.cues).map(c => `<li>${esc(c)}</li>`).join('')}</ol>
       ${tx(ex.mistakes).length ? `<h3>${esc(t('commonMistakes'))}</h3><ul class="cues warn">${tx(ex.mistakes).map(c => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
       ${rel ? `<div class="chips wrap">${rel}</div>` : ''}
-      <button class="btn small ghost" data-act="coach" data-q="${esc(tx(ex.name))}: ">${icon('chat')}${esc(t('askAboutThis'))}</button>
+      <div class="row2">${ex.kind !== 'cardio' && BODY.EXM[id] && PK.injuryHit(id, S.injuries, BODY).level !== 'avoid' ? `<button class="btn small" data-act="add-ex" data-id="${id}">${icon('plus')}${esc(t(S.active ? 'addToSession' : 'addToToday'))}</button>` : ''}<button class="btn small ghost" data-act="coach" data-q="${esc(tx(ex.name))}: ">${icon('chat')}${esc(t('askAboutThis'))}</button></div>
       ${lift && (lift.kg != null || lift.reps || lift.secs) ? `<h3>${esc(t('nextTime'))}</h3><p>${lift.kg != null ? n1(lift.kg) + ' kg' : ''}${lift.reps ? ' × ' + lift.reps : ''}${lift.secs ? ' · ' + lift.secs + ' s' : ''}</p>` : ''}
       ${hist.length ? `<h3>${esc(t('recent'))}</h3><ul class="mini-hist">${hist.map(h => `<li><span>${esc(shortDate(h.date))}</span><span>${h.kg ? n1(h.kg) + ' kg × ' : ''}${h.reps || (h.secs ? h.secs + ' s' : '')}</span></li>`).join('')}</ul>` : ''}` };
   },
@@ -957,15 +1027,7 @@ const SHEETS = {
     const links = (l.links || []).length ? `<div class="chips wrap">${l.links.map(x => `<button class="chip-btn" data-act="ex" data-id="${x}">${esc(exName(x))}</button>`).join('')}</div>` : '';
     return { title: `${t('lessonN', { n: +id.slice(1) })}: ${tx(l.title)}`, sub: tx(LS.PHASES[l.phase].name), body: `<div class="lesson-body">${body}</div>${links}
       <div class="task"><div class="eyebrow">${esc(t('yourTask'))}</div><p>${esc(tx(l.task))}</p>${lessonCheck(l)}</div>
-      ${id === 'L13' ? `<p class="small"><button class="link" data-act="redflags">${esc(t('redFlags'))}</button></p>` : ''}` };
-  },
-  redflags() {
-    return { title: t('redFlags'), sub: t('redFlagsSub'), body: `
-      <div class="flag-row emergency"><h3>${esc(t('emergency'))}</h3><p>${esc(t('emergencyBody'))}</p><a class="btn danger-solid block" href="tel:112">${esc(t('call112'))}</a></div>
-      <div class="flag-row red"><h3>${esc(t('zoneRed'))}</h3><p>${esc(t('zoneRedBody'))}</p></div>
-      <div class="flag-row yellow"><h3>${esc(t('zoneYellow'))}</h3><p>${esc(t('zoneYellowBody'))}</p></div>
-      <div class="flag-row green"><h3>${esc(t('zoneGreen'))}</h3><p>${esc(t('zoneGreenBody'))}</p></div>
-      <p class="muted small">${esc(t('notMedical'))}</p>` };
+` };
   },
   summary({ id }) {
     const s = S.sessions.find(x => x.id === id); if (!s) return {};
@@ -1026,6 +1088,24 @@ const SHEETS = {
       <h3>${esc(t('joints'))}</h3><div class="chips wrap">${['neck', 'shoulders', 'elbow', 'wrist', 'lower_back', 'hip', 'knee', 'ankle'].map(chipA).join('')}</div>
       <h3>${esc(t('muscles'))}</h3><div class="chips wrap">${BODY.muscleIds.filter(m => m !== 'shoulders' && m !== 'lower_back').map(chipA).join('')}</div>
       <p class="muted small">${esc(t('injSeeDoc'))}</p>` };
+  },
+  addex() {
+    const live = !!S.active, tpl = live ? null : todayTemplate();
+    const custom = live ? !!S.active.custom : !!tpl.custom, tplName = tx(live ? S.active.name : tpl.name);
+    const have = new Set(live ? S.active.items.map(i => i.ex) : planFor(tpl, false).map(x => x.ex.id));
+    const g = U.addGroup || 'all', pick = U.addPick;
+    const groups = ['all', 'chest', 'back', 'shoulders', 'arms', 'legs', 'glutes', 'core'];
+    const list = EX.list.filter(e => e.kind !== 'cardio' && BODY.EXM[e.id] && (g === 'all' || BODY.groupById[g].m.some(m => BODY.EXM[e.id].p.includes(m))));
+    const bar = pick ? `<div class="add-bar"><div class="add-bar-name">${icon('check')}<b>${esc(exName(pick))}</b></div><div class="row2">${live
+      ? `<button class="btn primary" data-act="add-ex-do" data-k="live">${esc(t('addToSession'))}</button>${custom ? '' : `<button class="btn" data-act="add-ex-do" data-k="live-always">${esc(t('addLiveAlways', { name: tplName }))}</button>`}`
+      : `<button class="btn primary" data-act="add-ex-do" data-k="today">${esc(t('addJustToday'))}</button>${custom ? '' : `<button class="btn" data-act="add-ex-do" data-k="always">${esc(t('addAlways', { name: tplName }))}</button>`}`}</div></div>` : `<p class="muted small">${esc(t('addHint'))}</p>`;
+    return { title: t('addExercise'), sub: live ? t('addLiveSub') : t('addSub', { name: tplName }), body: `
+      <div class="chips wrap">${groups.map(x => `<button class="chip-btn ${g === x ? 'on' : ''}" data-act="add-grp" data-v="${x}" aria-pressed="${g === x}">${esc(x === 'all' ? t('grpAll') : tx(BODY.groupById[x]))}</button>`).join('')}</div>
+      ${bar}
+      <ul class="pick-list">${list.map(e => { const hit = PK.injuryHit(e.id, S.injuries, BODY), blocked = hit.level === 'avoid', inSes = have.has(e.id);
+        return `<li><button class="plan-row ${pick === e.id ? 'picked' : ''}" data-act="add-pick" data-id="${e.id}" ${blocked || inSes ? 'disabled' : ''}>
+        <span class="thumb">${e.img ? `<img src="img/ex/${e.id}_0.jpg" alt="" loading="lazy">` : icon('go')}</span>
+        <span class="plan-main"><span class="plan-name">${esc(tx(e.name))}</span><span class="plan-meta ${blocked ? 'inj-text' : ''}">${esc(blocked ? t('addBlocked', { area: areasText(hit.areas) }) : inSes ? t('alreadyIn') : tx(e.muscles))}</span></span>${pick === e.id ? icon('check', 'pick-ic') : ''}</button></li>`; }).join('')}</ul>` };
   },
   pick() {
     const nt = nextTemplate(), planned = todayTemplate().custom;
@@ -1319,7 +1399,7 @@ function route(url) {
   const later = fn => setTimeout(fn, had ? 120 : 0);
   if (where === 'train') { if (S.active) setTab('train'); else { setTab('today'); later(startSession); } }
   else if (where === 'cardio') { setTab('today'); U.draftC = null; later(() => openSheet('cardio', {})); }
-  else if (['today', 'learn', 'progress', 'profile'].includes(where)) setTab(where);
+  else if (['today', 'learn', 'progress', 'profile', 'coach'].includes(where)) setTab(where);
 }
 
 /* ---------- backup ---------- */
@@ -1373,6 +1453,17 @@ function handleAct(act, b) {
     case 'focus-start': startFocus(id); break;
     case 'focus-end': S.focus = null; persist(); scheduleRender(); if (U.sheets.length) renderSheet(); toast(t('focusEnded')); break;
     case 'pick': openSheet('pick'); break;
+    case 'ex-media': U.exMedia = b.dataset.v; U.vidEdit = null; renderSheet(); break;
+    case 'vid-edit': U.vidEdit = U.vidEdit === id ? null : id; renderSheet(); break;
+    case 'vid-save': { const inp = $('#vid-url'), v = ytId(inp && inp.value); if (!v) { toast(t('videoBad')); break; }
+      S.settings.videos = Object.assign({}, S.settings.videos, { [id]: v }); U.vidEdit = null; persist(); renderSheet(); toast(t('videoSaved')); break; }
+    case 'vid-reset': if (S.settings.videos) { delete S.settings.videos[id]; persist(); } U.vidEdit = null; renderSheet(); break;
+    case 'add-ex': U.addPick = id && EX.byId[id] ? id : null; U.addGroup = 'all'; openSheet('addex'); break;
+    case 'add-grp': U.addGroup = b.dataset.v; renderSheet(); break;
+    case 'add-pick': U.addPick = id; renderSheet(); break;
+    case 'add-ex-do': { const k = b.dataset.k, pickId = U.addPick; if (!pickId) break; U.addPick = null;
+      if (k === 'live' || k === 'live-always') addLive(pickId, k === 'live-always'); else addToPlan(pickId, k); break; }
+    case 'add-ex-del': removeAdded(id, b.dataset.k); break;
     case 'plan-clear': S.planned = null; persist(); closeAllSheets(); scheduleRender(); break;
     case 'wk-build': { const g = BODY.groupById[id]; if (!g) break; U.draftW = { title: groupTitle([id]), items: PK.buildWorkout(g.m, bctx(), id === 'full' || id === 'upper' ? 6 : 5), src: 'built' }; openSheet('wk'); break; }
     case 'wk-build-m': { const m = BODY.byId[id]; if (!m) break; U.draftW = { title: both('wkTitle', { g: m.en }, { g: m.hr.toLowerCase() }), items: PK.buildWorkout([id], bctx(), 5), src: 'built' }; openSheet('wk'); break; }
@@ -1387,7 +1478,6 @@ function handleAct(act, b) {
     case 'sheet-back': closeSheet(); break;
     case 'ex': { const top = U.sheets[U.sheets.length - 1]; openSheet('ex', { id }, top && top.kind === 'ex'); break; }
     case 'lesson': openSheet('lesson', { id }); break;
-    case 'redflags': openSheet('redflags'); break;
     case 'readiness': U.draftR = null; openSheet('readiness'); break;
     case 'rq': { U.draftR.answers[b.dataset.q] = b.dataset.v === '1'; U.draftR.bpSys = num($('#rBpS').value); U.draftR.bpDia = num($('#rBpD').value); const cl = $('#rCleared'); if (cl) U.draftR.cleared = cl.checked; renderSheet(); break; }
     case 'readiness-save': saveReadiness(); break;

@@ -44,7 +44,7 @@
       cues: { en: ['Stand tall, dumbbells in front of your thighs, knees soft.', 'Push your hips back as if closing a car door with your bum; the dumbbells slide down your thighs.', 'Keep your back flat and stop when you feel a strong stretch behind the thighs (around mid-shin).', 'Squeeze your glutes to stand back up.'],
               hr: ['Stani uspravno, bučice ispred bedara, koljena lagano savijena.', 'Guraj kukove natrag kao da stražnjicom zatvaraš vrata auta; bučice klize niz bedra.', 'Leđa ravna; stani kad osjetiš jako istezanje iza bedara (otprilike sredina potkoljenice).', 'Stisni gluteuse i vrati se u uspravan položaj.'] },
       mistakes: { en: ['Rounding the back to reach lower.', 'Turning it into a squat by bending the knees a lot.'], hr: ['Savijanje leđa da bi se spustio niže.', 'Pretvaranje u čučanj jakim savijanjem koljena.'] },
-      note: { en: 'Your back aches after standing still: keep this light, stop at mid-shin, and finish lesson 7 first.', hr: 'Leđa te bole nakon dugog stajanja: drži ovo lagano, stani na sredini potkoljenice i prvo završi lekciju 7.' } },
+      note: { en: 'Start light, stop at mid-shin, and finish lesson 7 first.', hr: 'Počni lagano, stani na sredini potkoljenice i prvo završi lekciju 7.' } },
     { id: 'glute_bridge', img: 1, kind: 'bw', equip: 'body', pattern: 'hinge', harder: 'hip_thrust', alts: ['hip_thrust', 'back_extension'],
       name: { en: 'Glute bridge', hr: 'Most za gluteuse' },
       muscles: { en: 'Glutes, hamstrings', hr: 'Gluteusi, stražnja loža' },

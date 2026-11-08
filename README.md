@@ -15,6 +15,8 @@ English and Croatian; switch in Profile or with the EN/HR button at the top.
 | `www/data/programs.js` | Foundations (weeks 1–4) and Build (weeks 5–12): full-body A/B sessions |
 | `www/data/lessons.js` | The 19 lessons, in both languages |
 | `www/data/body.js` | Body map: muscles, joints, the figure's shapes, and which muscles and joints each exercise loads |
+| `www/anim.js`, `www/data/moves.js` | Exercise animations: a figure posed by joint angles (side or front view, with equipment), animated between key poses; works offline |
+| `www/data/videos.js` | One YouTube demo clip per exercise, played inside the app |
 | `www/ai.js` | AI client ported from Tanjur: Claude first while under the monthly limit, then free OpenRouter models, then Groq |
 | `www/coach.js` | Builds the coach's prompt from your training, food and lessons, and turns its answer into safe HTML with lesson and exercise buttons |
 | `www/img/ex/` | Exercise pictures from [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (public domain), resized |
@@ -58,6 +60,14 @@ On Android, Capacitor plugins' `addListener()` returns a plain `{ remove }` obje
 
 `@capgo/capacitor-health` reads most things but can't write exercise sessions and only writes nutrition as energy. `plugins/hc-bridge` is one Kotlin file that fills those gaps, using stable record IDs so editing or deleting something in either app updates Health Connect instead of duplicating it. The same folder is in the Tanjur repo.
 
+## Exercise animations and videos
+
+Each exercise sheet has three views: **Animation** (a simple moving figure, drawn by the app, works offline), **Photos** (the start and end photo, alternating) and **Video** (a short demo, played inside the app). Clips come from established sources where possible: NASM, Gold's Gym, GoodLife Fitness, OPEX and Concept2. If a clip won't play or you prefer another, *Use a different video* takes any YouTube link; *Open on YouTube* is there as a fallback.
+
+## Adding exercises yourself
+
+*Add exercise* on Today (or in the exercise sheet, or during a session) lets you pick any exercise from the library, filtered by area, and choose **Just today** or **Every** session of that A/B day. Added ones are tagged and can be removed with ✕. During a session it goes straight into the session, optionally kept for next time. Injuries still apply: exercises an injury rules out can't be picked.
+
 ## Body map, injuries and your own workouts
 
 Progress opens with a front and back figure. Each muscle is shaded by its sets per week (last 7 days or 4 weeks): a set counts fully for the exercise's main muscles and half for supporting ones. Walks and rides aren't counted.
@@ -76,7 +86,8 @@ The coach answers questions about training, pain, recovery and food, using your 
 - **No keys of its own.** In Tanjur, Profile → AI, switch on *Let PoKreni use these AI keys*. Tanjur then passes its Claude, OpenRouter and Groq keys to PoKreni over the direct link. PoKreni keeps them in memory only, never in its data file or backups, and forgets them if you switch it off.
 - **One Claude limit.** Both apps report what they spent this month, and Tanjur's monthly Claude limit covers the total. Once it's reached, the free models answer until next month.
 - **Safety first.** Questions that sound like an emergency (chest pain, fainting, numbness, and the like, in English or Croatian) show the 112 card before any AI answer. The coach is told never to diagnose or suggest medicines, and to send you to a doctor when pain or symptoms call for it.
-- **Your notes.** Profile → *For the coach* is a short free-text field (injuries, what your doctor said) that's added to every question.
+- **Your notes.** Profile → *For the coach* is a short free-text field (injuries, what your doctor said, how flexible you are) that's added to every question. The app itself assumes nothing about your body, job or schedule; the coach is told to rely only on these notes.
+- **Own tab.** The coach has its own tab in the bottom bar; Profile is the round button at the top right.
 
 Your question, the last few messages and that summary go to the AI service; nothing else leaves the phone.
 

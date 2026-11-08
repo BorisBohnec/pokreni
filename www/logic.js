@@ -402,7 +402,15 @@
     return B.GROUPS.filter(g => g.re.test(s)).map(g => g.id);
   }
 
-  return { pad, dkey, isKey, parseKey, addDays, daysBetween, weekStart, clamp, num, READINESS_QS, bpHigh, readiness,
+  /* A YouTube id from a link (watch, youtu.be, shorts, embed, live) or a bare 11-character id; '' if none. */
+  function ytId(s) {
+    s = String(s || '').trim();
+    if (/^[\w-]{11}$/.test(s)) return s;
+    const m = s.match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/|\/live\/)([\w-]{11})/);
+    return m ? m[1] : '';
+  }
+
+  return { ytId, pad, dkey, isKey, parseKey, addDays, daysBetween, weekStart, clamp, num, READINESS_QS, bpHigh, readiness,
     sessionsIn, setsFor, roundKg, target, painZone, evaluate, activeKcal, STRENGTH_MET, sessionMinutes, finisherMinutes,
     weekStats, weeksBack, autoCheck, retestStatus, liftHistory,
     muscleSets, muscleLevel, RANKS, RANK_SETS, rankFor, muscleRanks, leastTrained,
