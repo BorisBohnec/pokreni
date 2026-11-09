@@ -13,6 +13,7 @@
   const add = (p, a, l) => { const d = dir(a); return [p[0] + d[0] * l, p[1] + d[1] * l]; };
   const angTo = (p, q) => Math.atan2(q[0] - p[0], q[1] - p[1]) * 180 / Math.PI;
   const dist = (p, q) => Math.hypot(q[0] - p[0], q[1] - p[1]);
+  const ANGLE_KEYS = new Set(['t', 'hd', 'a1', 'f1', 'a2', 'f2', 'l1', 's1', 'p1', 'l2', 's2', 'p2']);
   const KEYS = ['t', 'hd', 'a1', 'f1', 'a2', 'f2', 'l1', 's1', 'p1', 'l2', 's2', 'p2', 'ak1', 'fk1', 'ak2', 'fk2', 'lk1', 'sk1', 'pk1', 'lk2', 'sk2', 'pk2'];
 
   /* Two-bone reach from root to target. bend +1 turns the middle joint towards larger angles. */
@@ -94,7 +95,12 @@
     const hold = spec.hold == null ? 0.18 : spec.hold;
     const u = ease(Math.min(1, Math.max(0, (local - hold / 2) / (1 - hold))));
     const o = Object.assign({}, A);
-    KEYS.forEach(k => { if (typeof A[k] === 'number' && typeof B[k] === 'number') o[k] = A[k] + (B[k] - A[k]) * u; });
+    /* Angles turn the short way round (180° to -96° is +84°, not -276° through the floor); lengths blend straight. */
+    KEYS.forEach(k => {
+      if (typeof A[k] !== 'number' || typeof B[k] !== 'number') return;
+      const d = ANGLE_KEYS.has(k) ? ((((B[k] - A[k]) % 360) + 540) % 360) - 180 : B[k] - A[k];
+      o[k] = A[k] + d * u;
+    });
     const aa = A.at || [W / 2, 100], bb = B.at || aa;
     o.at = [aa[0] + (bb[0] - aa[0]) * u, aa[1] + (bb[1] - aa[1]) * u];
     ['ik1', 'ik2', 'iw1', 'iw2'].forEach(k => { delete o[k]; });
@@ -138,8 +144,11 @@
     const farProps = props.filter(p => p.j && /2$/.test(p.j)).map(p => prop(Object.assign({}, p, { q }), J)).join('');
     const nearProps = props.filter(p => p.j && !/2$/.test(p.j)).map(p => prop(Object.assign({}, p, { q }), J)).join('');
     const torso = ln(J.hip, J.neck, 'fg-near', 15) + ln(J.neck, add(J.neck, q.hd, LEN.neck), 'fg-near', 7) + circ(J.head, LEN.head, 'fg-head');
-    /* Front view: both sides are equally near; draw legs, then torso, then arms. */
-    if (front) return `${pass('back')}${far.leg}${near.leg}${torso}${farProps}${far.arm}${near.arm}${nearProps}`;
+    /* Front view: both sides are equally near; shoulder and hip lines join the limbs to the body. */
+    if (front) {
+      const girdle = ln(J.s1, J.s2, 'fg-near', 10) + ln(J.h1, J.h2, 'fg-near', 11);
+      return `${pass('back')}${far.leg}${near.leg}${girdle}${torso}${farProps}${far.arm}${near.arm}${nearProps}`;
+    }
     return `${pass('back')}${farProps}${far.leg}${far.arm}${torso}${near.leg}${near.arm}${nearProps}`;
   }
   function svg(spec, phase, cls) {

@@ -50,3 +50,27 @@ test('nothing personal is built into the app; the coach only learns it from your
   for (const bad of [/8[–-]16/, /very flexible|vrlo fleksibil/i, /standing still makes|od dugog stajanja bole/i, /office job/i, /saturday shift|subotnja smjena/i, /your back aches/i, /bole te leđa|leđa te bole/i])
     assert.doesNotMatch(text, bad);
 });
+
+test('animations move naturally: short way round, nothing through the floor, joints bend the right way', () => {
+  const ANG = ['t', 'hd', 'a1', 'f1', 'a2', 'f2', 'l1', 's1', 'p1', 'l2', 's2', 'p2'];
+  const norm = d => ((d % 360) + 540) % 360 - 180;
+  for (const [id, spec] of Object.entries(MOVES)) {
+    let prev = null;
+    for (let i = 0; i <= 120; i++) {
+      const q = ANIM.poseAt(spec, i / 120);
+      if (prev) for (const k of ANG) assert.ok(Math.abs(norm(q[k] - prev[k])) < 25, `${id}: ${k} jumps at ${(i / 120).toFixed(2)}`);
+      prev = q;
+      const { J, q: r } = ANIM.place(q, spec.view);
+      for (const k of ['head', 'neck', 'sh', 'hip', 'e1', 'e2', 'w1', 'w2', 'k1', 'k2']) assert.ok(J[k][1] <= ANIM.GY + 4, `${id}: ${k} goes through the floor at ${(i / 120).toFixed(2)}`);
+      if (spec.view === 'front') continue;
+      for (const s of [1, 2]) {
+        const knee = norm(r['l' + s] - r['s' + s]), elbow = norm(r['f' + s] - r['a' + s]);
+        assert.ok(knee > -8 && knee < 165, `${id}: knee ${s} bends backwards (${knee.toFixed(0)}°)`);
+        if ((r['ak' + s] || 1) >= 0.8) assert.ok(elbow > -10 && elbow < 170, `${id}: elbow ${s} bends the wrong way (${elbow.toFixed(0)}°)`);
+      }
+    }
+  }
+  /* the dead bug's arm goes back overhead (+84°), never forward through the floor */
+  const db = MOVES.dead_bug, mid = ANIM.poseAt(db, 0.125);
+  assert.ok(mid.a1 > 180 && mid.a1 < 270, 'dead bug arm passes overhead');
+});

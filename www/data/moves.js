@@ -49,7 +49,7 @@
     db_bench: { props: [F, { k: 'rect', x: 34, y: 150, w: 104, h: 10 }, { k: 'line', p: [46, 160, 46, 186], w: 5 }, { k: 'line', p: [126, 160, 126, 186], w: 5 }].concat(DB),
       frames: [{ anchor: 'neck', at: [56, 144], t: -90, hd: -90, ik1: [168, 182], a1: 178, f1: 180 }, { anchor: 'neck', at: [56, 144], t: -90, hd: -90, ik1: [168, 182], a1: 28, f1: 178 }] },
     incline_db_press: { props: [F, { k: 'line', p: [82, 162, 34, 94], w: 9 }, { k: 'rect', x: 66, y: 156, w: 50, h: 9 }, { k: 'line', p: [86, 165, 86, 186], w: 5 }].concat(DB),
-      frames: [{ anchor: 'hip', at: [88, 150], t: 215, l1: 80, s1: 0, a1: 175, f1: 178 }, { anchor: 'hip', at: [88, 150], t: 215, l1: 80, s1: 0, a1: 5, f1: 178 }] },
+      frames: [{ anchor: 'hip', at: [88, 150], t: 215, l1: 80, s1: 0, a1: 172, f1: 176 }, { anchor: 'hip', at: [88, 150], t: 215, l1: 80, s1: 0, a1: 48, ak1: 0.6, f1: 178 }] },
     shoulder_press_machine: { props: [F, { k: 'line', p: [66, 146, 70, 60], w: 9 }, { k: 'rect', x: 58, y: 140, w: 50, h: 10 }, { k: 'line', p: [82, 150, 82, 186], w: 5 }, { k: 'grip', j: 'w1' }],
       frames: [{ anchor: 'hip', at: [82, 136], t: 182, l1: 88, s1: 0, a1: 50, f1: 175 }, { anchor: 'hip', at: [82, 136], t: 182, l1: 88, s1: 0, a1: 166, f1: 176 }] },
     db_shoulder_press: { view: 'front', props: [F, { k: 'rect', x: 100, y: 138, w: 60, h: 10 }, { k: 'line', p: [130, 148, 130, 186], w: 5 }].concat(DB),
@@ -59,13 +59,13 @@
     triceps_pushdown: { props: [F, { k: 'line', p: [182, 186, 182, 20], w: 6 }, { k: 'cable', from: [176, 24], j: 'w1' }],
       frames: [{ anchor: 'a1', at: [108, 182], t: 172, a1: 8, f1: 150 }, { anchor: 'a1', at: [108, 182], t: 172, a1: 8, f1: 10 }] },
     lat_pulldown: { props: [F, { k: 'rect', x: 66, y: 140, w: 50, h: 10 }, { k: 'line', p: [90, 150, 90, 186], w: 5 }, { k: 'rect', x: 116, y: 118, w: 20, h: 9 }, { k: 'line', p: [150, 186, 150, 10], w: 6 }, { k: 'line', p: [92, 10, 150, 10], w: 5 }, { k: 'cable', from: [94, 14], j: 'w1' }, { k: 'grip', j: 'w1' }],
-      frames: [{ anchor: 'hip', at: [90, 136], t: 190, l1: 90, s1: 0, a1: 170, f1: 170 }, { anchor: 'hip', at: [90, 136], t: 194, l1: 90, s1: 0, a1: -5, f1: 166 }] },
-    cable_row: { props: [F, { k: 'rect', x: 40, y: 150, w: 70, h: 10 }, { k: 'line', p: [74, 160, 74, 186], w: 5 }, { k: 'line', p: [160, 132, 160, 172], w: 6 }, { k: 'line', p: [214, 186, 214, 120], w: 6 }, { k: 'cable', from: [208, 146], j: 'w1' }, { k: 'grip', j: 'w1' }],
-      frames: [{ anchor: 'hip', at: [74, 144], t: 170, l1: 84, s1: 100, p1: 178, a1: 86, f1: 88 }, { anchor: 'hip', at: [74, 144], t: 186, l1: 84, s1: 100, p1: 178, a1: -55, f1: 95 }] },
+      frames: [{ anchor: 'hip', at: [90, 136], t: 190, l1: 90, s1: 0, a1: 170, f1: 170 }, { anchor: 'hip', at: [90, 136], t: 194, l1: 90, s1: 0, a1: -6, ak1: 0.85, f1: 150 }] },
+    cable_row: { props: [F, { k: 'rect', x: 40, y: 150, w: 70, h: 10 }, { k: 'line', p: [74, 160, 74, 186], w: 5 }, { k: 'line', p: [158, 128, 158, 176], w: 6 }, { k: 'line', p: [214, 186, 214, 120], w: 6 }, { k: 'cable', from: [208, 146], j: 'w1' }, { k: 'grip', j: 'w1' }],
+      frames: [{ anchor: 'hip', at: [74, 144], t: 170, l1: 86, s1: 72, p1: 172, a1: 86, f1: 88 }, { anchor: 'hip', at: [74, 144], t: 186, l1: 86, s1: 72, p1: 172, a1: -55, f1: 95 }] },
     db_row: { props: [F, { k: 'rect', x: 84, y: 140, w: 90, h: 10 }, { k: 'line', p: [96, 150, 96, 186], w: 5 }, { k: 'line', p: [162, 150, 162, 186], w: 5 }, { k: 'db', j: 'w1' }],
       frames: [{ anchor: 'k2', at: [104, 135], t: 92, l2: 0, s2: -90, p2: -100, iw2: [148, 138], ik1: [92, 182], p1: 90, a1: 2, f1: 0 }, { anchor: 'k2', at: [104, 135], t: 92, l2: 0, s2: -90, p2: -100, iw2: [148, 138], ik1: [92, 182], p1: 90, a1: -122, f1: -8 }] },
     face_pull: { props: [F, { k: 'line', p: [222, 186, 222, 20], w: 6 }, { k: 'cable', from: [216, 42], j: 'w1' }],
-      frames: [{ anchor: 'a1', at: [100, 182], t: 186, a1: 96, f1: 98 }, { anchor: 'a1', at: [100, 182], t: 186, a1: -98, f1: 138 }] },
+      frames: [{ anchor: 'a1', at: [100, 182], t: 186, a1: 96, f1: 98 }, { anchor: 'a1', at: [100, 182], t: 186, a1: 96, ak1: 0.22, f1: 150 }] },
     db_curl: { props: [F].concat(DB),
       frames: [{ anchor: 'a1', at: [118, 182], a1: 10, f1: 8 }, { anchor: 'a1', at: [118, 182], a1: 10, f1: 150 }] },
     dead_bug: { props: [F], dur: 4.4,
@@ -90,11 +90,11 @@
     farmer_carry: { props: [F].concat(DB), dur: 2, hold: 0, frames: walk() },
     treadmill_walk: { props: [{ k: 'rect', x: 44, y: 182, w: 176, h: 10, r: 5 }, { k: 'line', p: [212, 182, 230, 70], w: 5 }, { k: 'line', p: [222, 72, 196, 78], w: 6 }], dur: 2, hold: 0,
       frames: walk({ armsA: { a1: -22, f1: -12, a2: 26, f2: 50 }, armsC: { a2: -22, f2: -12, a1: 26, f1: 50 } }) },
-    bike_stationary: { props: [F, { k: 'line', p: [92, 112, 134, 152], w: 5 }, { k: 'line', p: [134, 152, 172, 98], w: 5 }, { k: 'line', p: [80, 108, 100, 108], w: 7 }, { k: 'line', p: [166, 96, 182, 92], w: 6 }, { k: 'line', p: [110, 186, 160, 186], w: 7 }, { k: 'line', p: [134, 152, 134, 186], w: 6 }, { k: 'crank', c: [134, 152] }],
+    bike_stationary: { props: [F, { k: 'line', p: [96, 186, 164, 186], w: 7 }, { k: 'line', p: [124, 156, 124, 186], w: 6 }, { k: 'line', p: [90, 112, 120, 158], w: 4 }, { k: 'line', p: [124, 156, 150, 86], w: 4 }, { k: 'line', p: [78, 110, 100, 110], w: 7 }, { k: 'line', p: [144, 84, 162, 81], w: 6 }, { k: 'crank', c: [124, 156] }],
       dur: 1.6, fn: p => {
-        const c = [134, 152], r = 17, ang = 360 * p;
+        const c = [124, 156], r = 16, ang = 360 * p;
         const ped = a => [c[0] + Math.sin(a * Math.PI / 180) * r, c[1] + Math.cos(a * Math.PI / 180) * r];
-        return { anchor: 'hip', at: [90, 102], t: 126, hd: 112, ik1: ped(ang), ik2: ped(ang + 180), p1: 100, p2: 100, iw1: [176, 95], iw2: [176, 95], wbend1: 1, wbend2: 1 };
+        return { anchor: 'hip', at: [88, 104], t: 150, hd: 140, ik1: ped(ang), ik2: ped(ang + 180), p1: 100, p2: 100, iw1: [156, 82], iw2: [156, 82] };
       } },
     rower: { props: [F, { k: 'line', p: [30, 168, 210, 168], w: 5 }, { k: 'line', p: [176, 168, 186, 140], w: 6 }, { k: 'line', p: [210, 186, 210, 140], w: 8 }, { k: 'cable', from: [206, 146], j: 'w1' }, { k: 'grip', j: 'w1' }], dur: 3.2, hold: 0.05,
       frames: [
