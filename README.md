@@ -62,7 +62,14 @@ On Android, Capacitor plugins' `addListener()` returns a plain `{ remove }` obje
 
 ## Exercise animations and videos
 
-Each exercise sheet has three views: **Animation** (a simple moving figure, drawn by the app, works offline), **Photos** (the start and end photo, alternating) and **Video** (a short demo, played inside the app). Clips come from established sources where possible: NASM, Gold's Gym, GoodLife Fitness, OPEX and Concept2. If a clip won't play or you prefer another, *Use a different video* takes any YouTube link; *Open on YouTube* is there as a fallback.
+Each exercise sheet has up to four views:
+
+- **Your clip:** a video (or GIF) you record at the gym or pick from your gallery. It's kept in the app's own storage on this phone (IndexedDB), plays offline, and comes first whenever there is one. Clips aren't part of backups.
+- **Animation:** a figure drawn by the app (shaped limbs, hands, feet, and an eye to show which way the head faces), animated between key poses. Works offline. Tests check that limbs turn the short way round, never pass through the floor, and that knees and elbows bend the right way.
+- **Photos:** the start and end photo, alternating.
+- **Video:** a short YouTube demo played inside the app, from established sources where possible (NASM, Gold's Gym, GoodLife Fitness, OPEX, Concept2). *Use a different video* takes any YouTube link; *Open on YouTube* is the fallback.
+
+Real footage that may be shipped inside the app doesn't exist for most of these exercises, which is why bundled demos are drawn and real video is either yours or streamed.
 
 ## Adding exercises yourself
 

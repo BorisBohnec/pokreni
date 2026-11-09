@@ -58,6 +58,8 @@ const ICONS = {
   up: '<path d="M6 15l6-6 6 6"/>',
   minus: '<path d="M5 12h14"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
+  video: '<rect x="3" y="6.5" width="12.5" height="11" rx="2.5"/><path d="M15.5 10.5 21 7.5v9l-5.5-3"/>',
+  upload: '<path d="M12 15.5V4.5M7.5 9 12 4.5 16.5 9M5 15v4.5h14V15"/>',
   target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".8"/>',
   sync: '<path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9M4.5 12a7.5 7.5 0 0 1 13.2-4.9"/><path d="M18.5 3.5v4h-4M5.5 20.5v-4h4"/>'
 };
@@ -98,7 +100,7 @@ const S = {
   savedAt: 0
 };
 const U = { tab: 'today', rest: null, tick: 0, sheets: [], hcBusy: false, tanjur: null, tjState: '', tjAt: 0, gradDismissed: false,
-  ai: null, tjUsage: null, coachBusy: null, coachDraft: '', coachLang: '', bmDays: 7, draftW: null, addPick: null, addGroup: 'all', exMedia: 'draw', vidEdit: null };
+  ai: null, tjUsage: null, coachBusy: null, coachDraft: '', coachLang: '', bmDays: 7, draftW: null, addPick: null, addGroup: 'all', exMedia: null, vidEdit: null };
 
 function applyData(d) {
   if (!d || typeof d !== 'object') return;
@@ -879,7 +881,7 @@ function renderProfile() {
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.4.1 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.5 · ${esc(t('aboutLine'))}</p>`;
 }
 function weightField() {
   const w = weightSource();
@@ -936,17 +938,57 @@ function renderSheet() {
   $('#sheetBody').innerHTML = r.body || '';
   const mv = $('#sheetBody svg.move[data-move]');
   if (mv && ANIM && MOVES[mv.dataset.move]) ANIM.play(mv, MOVES[mv.dataset.move]);
+  mountClip();
 }
 const ytId = PK.ytId;
+/* Your own clips: videos (or GIFs) you record or pick, kept in the app's own storage on this phone. They play
+   offline and aren't part of backups. S.settings.clips holds what exists; the files live in IndexedDB. */
+const CLIPS = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('pokreni-media', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('clips');
+    r.onsuccess = () => res(r.result); r.onerror = () => { dbp = null; rej(r.error); };
+  }));
+  const run = (mode, fn) => open().then(db => new Promise((res, rej) => {
+    const t = db.transaction('clips', mode), req = fn(t.objectStore('clips'));
+    t.oncomplete = () => res(req ? req.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+  }));
+  return { get: id => run('readonly', st => st.get(id)), put: (id, v) => run('readwrite', st => st.put(v, id)), del: id => run('readwrite', st => st.delete(id)) };
+})();
+const hasClip = id => !!(S.settings.clips && S.settings.clips[id]);
+let clipUrl = null;
+function mountClip() {
+  const el = $('#sheetBody [data-clip]');
+  if (clipUrl) { URL.revokeObjectURL(clipUrl); clipUrl = null; }
+  if (!el) return;
+  CLIPS.get(el.dataset.clip).then(rec => {
+    if (!rec || !rec.blob || !el.isConnected) { if (el.isConnected) el.outerHTML = `<p>${esc(t('clipMissing'))}</p>`; return; }
+    clipUrl = URL.createObjectURL(rec.blob); el.src = clipUrl;
+  }).catch(() => { if (el.isConnected) el.outerHTML = `<p>${esc(t('clipMissing'))}</p>`; });
+}
+async function saveClip(id, file) {
+  if (!file) return;
+  if (!/^video\/|^image\/gif$/.test(file.type || '')) { toast(t('clipType')); return; }
+  if (file.size > 150 * 1024 * 1024) { toast(t('clipBig')); return; }
+  try {
+    await CLIPS.put(id, { blob: file, type: file.type, size: file.size, at: Date.now() });
+    S.settings.clips = Object.assign({}, S.settings.clips, { [id]: { type: file.type, size: file.size, at: Date.now() } });
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    U.exMedia = 'clip'; persist(); renderSheet(); toast(t('clipSaved'));
+  } catch (e) { toast(t('clipFail')); }
+}
 const videoFor = id => { const own = S.settings.videos && S.settings.videos[id]; return own ? { v: own, own: true } : VIDEOS[id] || null; };
 /* Drawing (offline), the two photos alternating, or the demo video, inside the exercise sheet. */
 function mediaBlock(id) {
   const ex = EX.byId[id], vid = videoFor(id);
-  const modes = [MOVES[id] && 'draw', ex.img && 'photo', 'video'].filter(Boolean);
+  const own = hasClip(id);
+  const modes = [own && 'clip', MOVES[id] && 'draw', ex.img && 'photo', 'video'].filter(Boolean);
   const m = modes.includes(U.exMedia) ? U.exMedia : modes[0];
   const tabs = `<div class="seg small media-tabs">${modes.map(x => `<button data-act="ex-media" data-v="${x}" aria-pressed="${m === x}">${esc(t('media_' + x))}</button>`).join('')}</div>`;
   let box;
-  if (m === 'draw') box = `<div class="media-box draw"><svg class="move" viewBox="0 0 ${ANIM.W} ${ANIM.H}" data-move="${id}" role="img" aria-label="${esc(t('media_draw'))}"></svg></div>`;
+  if (m === 'clip') box = `<div class="media-box clip">${/gif/.test(S.settings.clips[id].type) ? `<img data-clip="${id}" alt="${esc(t('media_clip'))}">` : `<video data-clip="${id}" autoplay muted loop playsinline controls preload="auto"></video>`}</div>`;
+  else if (m === 'draw') box = `<div class="media-box draw"><svg class="move" viewBox="0 0 ${ANIM.W} ${ANIM.H}" data-move="${id}" role="img" aria-label="${esc(t('media_draw'))}"></svg></div>`;
   else if (m === 'photo') box = `<div class="media-box photo"><img src="img/ex/${id}_0.jpg" alt="${esc(t('startPos'))}"><img class="b" src="img/ex/${id}_1.jpg" alt="${esc(t('endPos'))}"></div>`;
   else if (!vid) box = `<div class="media-box note"><p>${esc(t('videoNone'))}</p></div>`;
   else if (navigator.onLine === false) box = `<div class="media-box note"><p>${esc(t('videoOffline'))}</p></div>`;
@@ -956,7 +998,11 @@ function mediaBlock(id) {
     foot = `<p class="muted small media-foot">${vid && vid.by && !vid.own ? esc(t('videoBy', { by: vid.by })) + ' · ' : ''}${vid ? `<a href="https://www.youtube.com/watch?v=${encodeURIComponent(vid.v)}" target="_blank" rel="noopener">${esc(t('openYoutube'))}</a> · ` : ''}<button class="link" data-act="vid-edit" data-id="${id}">${esc(t(vid ? 'changeVideo' : 'addVideo'))}</button></p>`;
     if (U.vidEdit === id) foot += `<div class="vid-edit"><input id="vid-url" data-id="${id}" inputmode="url" placeholder="https://youtu.be/…" value="${esc(vid && vid.own ? 'https://youtu.be/' + vid.v : '')}"><div class="row2"><button class="btn small primary" data-act="vid-save" data-id="${id}">${esc(t('save'))}</button>${vid && vid.own ? `<button class="btn small ghost" data-act="vid-reset" data-id="${id}">${esc(t('videoReset'))}</button>` : ''}</div><p class="muted small">${esc(t('videoEditNote'))}</p></div>`;
   } else if (m === 'draw') foot = `<p class="muted small media-foot">${esc(t('drawNote'))}</p>`;
-  return `<div class="ex-media">${tabs}${box}${foot}</div>`;
+  /* Record a clip at the gym (opens the camera) or pick one you already have. */
+  const clipTools = `<div class="clip-tools"><span class="muted small">${esc(t(own ? 'clipYours' : 'clipAdd'))}</span>
+    <button class="btn small ghost" data-act="clip-rec">${icon('video')}${esc(t(own ? 'clipReRecord' : 'clipRecord'))}</button><button class="btn small ghost" data-act="clip-pick">${icon('upload')}${esc(t('clipPick'))}</button>${own ? `<button class="btn small ghost danger" data-act="clip-del" data-id="${id}">${icon('trash')}</button>` : ''}
+    <input type="file" id="clip-rec" data-id="${id}" accept="video/*" capture="environment" hidden><input type="file" id="clip-pick" data-id="${id}" accept="video/*,image/gif" hidden></div>`;
+  return `<div class="ex-media">${tabs}${box}${foot}${clipTools}</div>`;
 }
 const SHEETS = {
   ex({ id }) {
@@ -1454,6 +1500,10 @@ function handleAct(act, b) {
     case 'focus-end': S.focus = null; persist(); scheduleRender(); if (U.sheets.length) renderSheet(); toast(t('focusEnded')); break;
     case 'pick': openSheet('pick'); break;
     case 'ex-media': U.exMedia = b.dataset.v; U.vidEdit = null; renderSheet(); break;
+    case 'clip-rec': { const i = $('#clip-rec'); if (i) i.click(); break; }
+    case 'clip-pick': { const i = $('#clip-pick'); if (i) i.click(); break; }
+    case 'clip-del': openSheet('confirm', { msg: t('clipDelAsk'), yes: t('delete'), act: 'clip-del-yes', id }); break;
+    case 'clip-del-yes': CLIPS.del(id).catch(() => {}); if (S.settings.clips) { delete S.settings.clips[id]; persist(); } closeSheet(); toast(t('clipDeleted')); break;
     case 'vid-edit': U.vidEdit = U.vidEdit === id ? null : id; renderSheet(); break;
     case 'vid-save': { const inp = $('#vid-url'), v = ytId(inp && inp.value); if (!v) { toast(t('videoBad')); break; }
       S.settings.videos = Object.assign({}, S.settings.videos, { [id]: v }); U.vidEdit = null; persist(); renderSheet(); toast(t('videoSaved')); break; }
@@ -1571,6 +1621,7 @@ function bindEvents() {
     switch (el.id) {
       case 'pf-name': S.profile.name = el.value.trim().slice(0, 40); persist(); break;
       case 'pf-notes': S.profile.notes = el.value.trim().slice(0, 600); persist(); break;
+      case 'clip-rec': case 'clip-pick': saveClip(el.dataset.id, el.files && el.files[0]); return;
       case 'inj-note': { const inj = injuryOf(el.dataset.id); if (inj) { inj.note = el.value.trim().slice(0, 120); persist(); } break; }
       case 'pf-lang': setLang(el.value); break;
       case 'pf-kg': { const v = num(el.value); S.profile.kg = v && v > 30 && v < 350 ? v : null; persist(); break; }

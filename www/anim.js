@@ -128,28 +128,41 @@
       default: return '';
     }
   }
+  /* A tapered capsule from p (radius r1) to q (radius r2): limbs and torso are drawn as these, so they read as a body. */
+  function cap(p, q, r1, r2, cls) {
+    const dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy);
+    if (L < 0.5) return circ(p, Math.max(r1, r2), cls);
+    const ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+    const P = (o, k, r) => `${f1(o[0] + nx * r * k)} ${f1(o[1] + ny * r * k)}`;
+    return `<path class="${cls}" d="M${P(p, 1, r1)} L${P(q, 1, r2)} A${r2} ${r2} 0 0 0 ${P(q, -1, r2)} L${P(p, -1, r1)} A${r1} ${r1} 0 0 0 ${P(p, 1, r1)}Z"/>`;
+  }
   /* SVG markup for one moment of an exercise. */
   function frameSVG(spec, phase) {
     const q = poseAt(spec, phase || 0);
     const { J } = place(q, spec.view);
     const props = spec.props || [];
     const pass = layer => props.filter(p => (p.layer || (p.j ? 'front' : 'back')) === layer).map(p => prop(Object.assign({}, p, { q }), J)).join('');
-    const limb = (i, cls) => {
-      const leg = ln(J['h' + i], J['k' + i], cls, 9) + ln(J['k' + i], J['a' + i], cls, 8) + ln(J['a' + i], J['t' + i], cls, 6);
-      const arm = ln(J['s' + i], J['e' + i], cls, 8) + ln(J['e' + i], J['w' + i], cls, 7) + circ(J['w' + i], 3.6, cls === 'fg-near' ? 'fg-hand' : 'fg-hand-far');
-      return { leg, arm };
-    };
     const front = spec.view === 'front';
-    const far = limb(2, front ? 'fg-near' : 'fg-far'), near = limb(1, 'fg-near');
+    const limb = (i, cls) => ({
+      leg: cap(J['h' + i], J['k' + i], 8.6, 6.2, cls) + cap(J['k' + i], J['a' + i], 5.8, 3.9, cls) + cap(J['a' + i], J['t' + i], 4, 2.8, cls),
+      arm: cap(J['s' + i], J['e' + i], 6.2, 4.5, cls) + cap(J['e' + i], J['w' + i], 4.4, 3.2, cls) + circ(J['w' + i], 3.9, cls)
+    });
+    const far = limb(2, front ? 'fg-body' : 'fg-body-far'), near = limb(1, 'fg-body');
     const farProps = props.filter(p => p.j && /2$/.test(p.j)).map(p => prop(Object.assign({}, p, { q }), J)).join('');
     const nearProps = props.filter(p => p.j && !/2$/.test(p.j)).map(p => prop(Object.assign({}, p, { q }), J)).join('');
-    const torso = ln(J.hip, J.neck, 'fg-near', 15) + ln(J.neck, add(J.neck, q.hd, LEN.neck), 'fg-near', 7) + circ(J.head, LEN.head, 'fg-head');
-    /* Front view: both sides are equally near; shoulder and hip lines join the limbs to the body. */
+    const neckTop = add(J.neck, q.hd, LEN.neck);
+    let torso;
     if (front) {
-      const girdle = ln(J.s1, J.s2, 'fg-near', 10) + ln(J.h1, J.h2, 'fg-near', 11);
-      return `${pass('back')}${far.leg}${near.leg}${girdle}${torso}${farProps}${far.arm}${near.arm}${nearProps}`;
+      /* Shoulders wider than hips, joined into one shape, with the neck on top. */
+      const poly = [J.s1, J.s2, J.h2, J.h1].map(p => `${f1(p[0])},${f1(p[1])}`).join(' ');
+      torso = `<polygon points="${poly}" class="fg-body fg-round"/>` + cap(J.h1, J.h2, 9, 9, 'fg-body') + cap(J.s1, J.s2, 7, 7, 'fg-body') + cap(J.neck, neckTop, 4.6, 4.2, 'fg-body');
+    } else {
+      torso = cap(J.hip, J.sh, 10.5, 12.5, 'fg-body') + cap(J.neck, neckTop, 4.8, 4.4, 'fg-body');
     }
-    return `${pass('back')}${farProps}${far.leg}${far.arm}${torso}${near.leg}${near.arm}${nearProps}`;
+    let head = circ(J.head, LEN.head + 0.5, 'fg-body');
+    if (!front) { const face = dir(q.hd - 90), up = dir(q.hd); head += circ([J.head[0] + face[0] * 5.2 + up[0] * 1.5, J.head[1] + face[1] * 5.2 + up[1] * 1.5], 1.7, 'fg-eye'); }
+    if (front) return `${pass('back')}${far.leg}${near.leg}${torso}${head}${farProps}${far.arm}${near.arm}${nearProps}`;
+    return `${pass('back')}${farProps}${far.leg}${far.arm}${torso}${head}${near.leg}${near.arm}${nearProps}`;
   }
   function svg(spec, phase, cls) {
     return `<svg class="${cls || 'move'}" viewBox="0 0 ${W} ${H}" role="img" aria-hidden="true">${frameSVG(spec, phase)}</svg>`;
