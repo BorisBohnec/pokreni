@@ -12,7 +12,7 @@ English and Croatian; switch in Profile or with the EN/HR button at the top.
 | `www/logic.js` | Training logic with no UI: readiness check, double progression, pain rules, weekly totals, lesson checks |
 | `www/i18n.js` | Interface text in English and Croatian |
 | `www/data/exercises.js` | 39 exercises with cues, common mistakes, easier and harder versions, in both languages |
-| `www/data/programs.js` | Foundations (weeks 1–4) and Build (weeks 5–12): full-body A/B sessions |
+| `www/data/programs.js` | Foundations (weeks 1–4) and Build (weeks 5–12): full-body A/B sessions, and the warm-up with a how-to for each move |
 | `www/data/lessons.js` | The 19 lessons, in both languages |
 | `www/data/body.js` | Body map: muscles, joints, the figure's shapes, and which muscles and joints each exercise loads |
 | `www/anim.js`, `www/data/moves.js` | Exercise animations: a figure posed by joint angles (side or front view, with equipment), animated between key poses; works offline |
@@ -53,12 +53,24 @@ Health Connect is optional on top of that:
 | PoKreni → Health Connect | Each finished session (strength training) and each walk or ride, with estimated active calories |
 | Health Connect → Tanjur | Tanjur already reads workouts and adds them to the day's budget |
 | Tanjur → Health Connect | Weigh-ins and meal nutrition (kcal, protein, carbs, fat), when switched on in Tanjur |
-| Health Connect → PoKreni | Weight, last night's sleep, steps, workouts from your watch, and protein from Tanjur |
+| Health Connect → PoKreni | Weight, last night's sleep, steps, heart rate, workouts from your watch, and protein from Tanjur |
 | Deep links | `pokreni://today`, `pokreni://train`, `pokreni://cardio`, `pokreni://learn`; PoKreni opens `tanjur://today` and `tanjur://add` |
 
 On Android, Capacitor plugins' `addListener()` returns a plain `{ remove }` object when `@capacitor/core` isn't bundled (it isn't here), so `app.js` attaches every native listener through `listen()`; a test checks this. Back closes the open sheet, then returns to Today, then leaves the app.
 
-`@capgo/capacitor-health` reads most things but can't write exercise sessions and only writes nutrition as energy. `plugins/hc-bridge` is one Kotlin file that fills those gaps, using stable record IDs so editing or deleting something in either app updates Health Connect instead of duplicating it. The same folder is in the Tanjur repo.
+`@capgo/capacitor-health` reads most things but can't write exercise sessions and only writes nutrition as energy. `plugins/hc-bridge` is one Kotlin file that fills those gaps, using stable record IDs so editing or deleting something in either app updates Health Connect instead of duplicating it. The same folder is in the Tanjur repo; PoKreni's copy also has `openApp` (opens Zepp or its Play Store page).
+
+## Smartwatch (Amazfit Active 3 Premium and other Zepp watches)
+
+Amazfit watches can't be paired with other apps: they only talk to the Zepp app. Zepp can share to Health Connect, and PoKreni reads it from there, so no extra login or API key is involved.
+
+1. In Zepp: Profile → 3rd-party account linking → Health Connect → turn on *Sync with Health Connect*, then *Allow all*.
+2. In PoKreni: Profile → Health Connect → connect (or *Ask again* if you connected before 1.6, to allow heart rate).
+3. *Sync now*. Zepp passes data on every so often, and right away when you open it.
+
+What comes through: steps (today and the week's average), last night's sleep, resting heart rate (or the lowest heart rate of the day when Zepp doesn't record a resting value) and workouts you record on the watch. They show on Today and in Profile → Smartwatch, count toward weekly active minutes, preselect the sleep answer in the pre-session check-in, and go to the coach. PoKreni recognises the watch by the app that wrote each record (`com.huami.watch.hmwatchmanager`), so steps from the phone or another app still show, just without the watch label. *Open Zepp* opens the app (or its Play Store page).
+
+The rest timer already sends a notification when your rest ends; turn on PoKreni in the watch's app notifications in Zepp and the watch buzzes too.
 
 ## Exercise animations and videos
 
@@ -71,9 +83,15 @@ Each exercise sheet has up to four views:
 
 Real footage that may be shipped inside the app doesn't exist for most of these exercises, which is why bundled demos are drawn and real video is either yours or streamed.
 
+Each warm-up move has an ⓘ button too: an animation, why it helps, how to do it, and a link to the full guide of the matching exercise (videos and your clip).
+
+*Ask the coach* on an exercise starts the question for you: how to do it and what weight to use (or how many reps, how long to hold it, how long and hard to go). The coach gets that exercise's full history and the app's next target, or is told it's new to you.
+
 ## Adding exercises yourself
 
-*Add exercise* on Today (or in the exercise sheet, or during a session) lets you pick any exercise from the library, filtered by area, and choose **Just today** or **Every** session of that A/B day. Added ones are tagged and can be removed with ✕. During a session it goes straight into the session, optionally kept for next time. Injuries still apply: exercises an injury rules out can't be picked.
+*Add exercise* on Today (or in the exercise sheet, or during a session) lets you pick any exercise from the library, by area or by typing in the search box (English or Croatian name, muscle, equipment; accents optional, so *cucanj* finds *Čučanj*), and choose **Just today** or **Every** session of that A/B day. Added ones are tagged and can be removed with ✕. During a session it goes straight into the session, optionally kept for next time. Injuries still apply: exercises an injury rules out can't be picked.
+
+The exercise library at the bottom of Learn has the same search.
 
 ## Body map, injuries and your own workouts
 

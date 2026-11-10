@@ -9,8 +9,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const clone = o => (o == null ? o : JSON.parse(JSON.stringify(o)));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const pad = PK.pad;
-const PKG_SELF = 'app.pokreni.trainer', PKG_TANJUR = 'app.tanjur.tracker';
-const HC_PERMS = ['WRITE_EXERCISE', 'READ_EXERCISE', 'WRITE_ACTIVE_CALORIES_BURNED', 'READ_WEIGHT', 'READ_SLEEP', 'READ_STEPS', 'READ_NUTRITION'].map(p => 'android.permission.health.' + p);
+const PKG_SELF = 'app.pokreni.trainer', PKG_TANJUR = 'app.tanjur.tracker', PKG_ZEPP = 'com.huami.watch.hmwatchmanager';
+const HC_PERMS = ['WRITE_EXERCISE', 'READ_EXERCISE', 'WRITE_ACTIVE_CALORIES_BURNED', 'READ_WEIGHT', 'READ_SLEEP', 'READ_STEPS', 'READ_HEART_RATE', 'READ_RESTING_HEART_RATE', 'READ_NUTRITION'].map(p => 'android.permission.health.' + p);
 
 /* ---------- language ---------- */
 let LANG = 'en';
@@ -59,6 +59,8 @@ const ICONS = {
   minus: '<path d="M5 12h14"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
   video: '<rect x="3" y="6.5" width="12.5" height="11" rx="2.5"/><path d="M15.5 10.5 21 7.5v9l-5.5-3"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>',
+  watch: '<rect x="6.5" y="6.5" width="11" height="11" rx="3"/><path d="M9 6.5 9.6 3h4.8l.6 3.5M9 17.5l.6 3.5h4.8l.6-3.5M12 9.5V12l1.5 1"/>',
   upload: '<path d="M12 15.5V4.5M7.5 9 12 4.5 16.5 9M5 15v4.5h14V15"/>',
   target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r=".8"/>',
   sync: '<path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9M4.5 12a7.5 7.5 0 0 1 13.2-4.9"/><path d="M18.5 3.5v4h-4M5.5 20.5v-4h4"/>'
@@ -94,7 +96,7 @@ const S = {
   profile: DEFAULT_PROFILE(), readiness: null, baselines: [], lessons: {}, quiz: {},
   program: { id: 'foundations', next: 0 }, lifts: {}, sessions: [], cardio: [], active: null,
   settings: { health: { on: false }, remind: { on: false, time: '16:30' } },
-  hc: { weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, syncedAt: 0, granted: [] },
+  hc: { weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, extList: [], rhr: null, sources: {}, syncedAt: 0, granted: [] },
   tanjur: null, coach: { msgs: [] }, aiUsage: null,
   injuries: [], focus: null, workouts: [], planned: null, extras: {}, todayExtra: null,
   savedAt: 0
@@ -115,7 +117,7 @@ function applyData(d) {
   S.cardio = Array.isArray(d.cardio) ? d.cardio.filter(c => c && c.id && PK.isKey(c.date)) : [];
   S.active = d.active && d.active.items ? d.active : null;
   S.settings = Object.assign({ health: { on: false }, remind: { on: false, time: '16:30' } }, d.settings || {});
-  S.hc = Object.assign({ weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, syncedAt: 0, granted: [] }, d.hc || {});
+  S.hc = Object.assign({ weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, extList: [], rhr: null, sources: {}, syncedAt: 0, granted: [] }, d.hc || {});
   S.tanjur = d.tanjur && d.tanjur.app === 'tanjur' ? d.tanjur : null;
   if (S.tanjur) delete S.tanjur.ai;
   S.coach = d.coach && Array.isArray(d.coach.msgs) ? { msgs: d.coach.msgs.slice(-40) } : { msgs: [] };
@@ -341,6 +343,8 @@ function hideToast() { const el = $('#toast'); el.classList.remove('show'); setT
 
 /* ---------- render ---------- */
 let rq = 0;
+/* True while a text field inside root has focus, so a background refresh can wait instead of replacing it. */
+function typingIn(sel) { const a = document.activeElement, root = $(sel); return !!(a && root && root.contains(a) && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(checkbox|radio|file|button|submit)$/.test(a.type)))); }
 function scheduleRender() { if (rq) return; rq = requestAnimationFrame(() => { rq = 0; renderAll(); }); }
 function renderAll() {
   document.documentElement.lang = LANG;
@@ -349,7 +353,7 @@ function renderAll() {
   const views = { today: renderToday, learn: renderLearn, train: renderTrain, progress: renderProgress, profile: renderProfile, coach: renderCoach };
   safely(views[U.tab], '#view-' + U.tab);
   safely(renderRestBar);
-  if (U.sheets.length) safely(renderSheet, '#sheetBody');
+  if (U.sheets.length && !typingIn('#sheetBody')) safely(renderSheet, '#sheetBody');
 }
 /* One broken card never blanks the whole screen: the error is shown in place so it can be reported. */
 function safely(fn, sel) {
@@ -391,6 +395,7 @@ function renderToday() {
       <button class="btn primary block" data-act="tab" data-tab="train">${icon('play')}${esc(t('resume'))}</button></section>`;
   } else if (canGym()) html += nextSessionCard(d);
   html += weekCard(k);
+  html += watchStrip();
   const nl = nextLesson();
   if (nl) html += `<section class="card lesson-next" data-act="lesson" data-id="${nl.id}" role="button" tabindex="0"><div class="eyebrow">${esc(t('nextLesson'))} · ${esc(tx(LS.PHASES[nl.phase].name))}</div>
     <h2>${esc(t('lessonN', { n: +nl.id.slice(1) }))}: ${esc(tx(nl.title))}</h2><p class="muted">${esc(tx(nl.task))}</p></section>`;
@@ -433,7 +438,10 @@ function weekCard(k) {
   const items = [];
   S.sessions.filter(s => s.date >= ws).forEach(s => items.push({ date: s.date, t: s.start, label: tx(s.name), meta: `${PK.sessionMinutes(s)} min`, ic: 'go', act: `data-act="hist" data-id="${s.id}"` }));
   S.cardio.filter(c => c.date >= ws).forEach(c => items.push({ date: c.date, t: c.start || c.date, label: exName(c.type), meta: `${c.minutes} min`, ic: 'walk', act: `data-act="cardio" data-id="${c.id}"` }));
-  for (const d in extMinutes()) if (d >= ws) items.push({ date: d, t: d, label: t('fromWatch'), meta: `${extMinutes()[d]} min`, ic: 'heart', act: '' });
+  /* Workouts other apps put in Health Connect (the watch through Zepp, Samsung Health…), one row each when we know them. */
+  const named = (S.hc.extList || []).filter(x => x.date >= ws), namedDays = new Set(named.map(x => x.date));
+  named.forEach(x => items.push({ date: x.date, t: x.start, label: x.title || t('workoutFrom', { app: PK.appName(x.app) }), meta: `${x.mins} min`, ic: PK.ZEPP.includes(x.app) ? 'watch' : 'heart', act: '' }));
+  for (const d in extMinutes()) if (d >= ws && !namedDays.has(d)) items.push({ date: d, t: d, label: t('fromWatch'), meta: `${extMinutes()[d]} min`, ic: 'heart', act: '' });
   items.sort((a, b) => (a.t < b.t ? 1 : -1));
   const pct = clamp(w.cardioMin / 150 * 100, 0, 100);
   return `<section class="card week"><div class="card-head"><h2>${esc(t('thisWeek'))}</h2><button class="btn small ghost" data-act="cardio">${icon('plus')}${esc(t('logCardio'))}</button></div>
@@ -476,8 +484,15 @@ function renderLearn() {
         <span class="lnum">${d ? icon('check') : +l.id.slice(1)}</span><span class="lmain"><span class="lname">${esc(tx(l.title))}</span><span class="lmeta">${esc(tx(l.task))}</span></span>${icon('right', 'chev')}</button></li>`; }).join('')}
     </ol></section>`;
   });
-  html += `<section class="card"><h2>${esc(t('library'))}</h2><p class="muted small">${esc(t('libraryBody'))}</p><div class="chips wrap">${EX.list.map(e => `<button class="chip-btn" data-act="ex" data-id="${e.id}">${esc(tx(e.name))}</button>`).join('')}</div></section>`;
-  el.innerHTML = html;
+  /* The library is built once per language, so a background refresh never wipes what you're typing in its search. */
+  if (!$('#learnLib') || U.libLang !== LANG) {
+    el.innerHTML = `<div id="learnTop"></div><section class="card" id="learnLib"><h2>${esc(t('library'))}</h2><p class="muted small">${esc(t('libraryBody'))}</p>
+      ${searchBox('lib-q', U.libQ)}<div class="chips wrap" id="lib-list">${EX.list.map(e => `<button class="chip-btn" data-act="ex" data-id="${e.id}">${esc(tx(e.name))}</button>`).join('')}</div>
+      <p class="muted small search-none" id="lib-none" hidden></p></section>`;
+    U.libLang = LANG;
+    applyLibFilter();
+  }
+  $('#learnTop').innerHTML = html;
 }
 
 /* ---------- train (live session) ---------- */
@@ -512,7 +527,7 @@ function renderTrain() {
     <div class="elapsed" id="elapsed">${mmss(elapsed)}</div></header>`;
   if (A.lighter) html += `<p class="banner info">${icon('info')}${esc(t('lighterBody'))}</p>`;
   html += `<section class="card warm"><button class="warm-head" data-act="warm-toggle"><h2>${esc(t('warmup'))}</h2><span class="muted small">${warm.filter(w => A.warmup[w.id]).length}/${warm.length}</span>${icon(A.warmOpen ? 'up' : 'down', 'chev')}</button>
-    ${A.warmOpen ? `<ul class="checklist">${warm.map(w => `<li><label><input type="checkbox" data-warm="${w.id}" ${A.warmup[w.id] ? 'checked' : ''}><span>${esc(tx(w))}</span></label></li>`).join('')}</ul>` : ''}</section>`;
+    ${A.warmOpen ? `<ul class="checklist">${warm.map(w => `<li><label><input type="checkbox" data-warm="${w.id}" ${A.warmup[w.id] ? 'checked' : ''}><span>${esc(tx(w))}</span></label><button class="row-x warm-info" data-act="warm-info" data-id="${w.id}" aria-label="${esc(t('warmHow', { name: tx(w) }))}">${icon('info')}</button></li>`).join('')}</ul>` : ''}</section>`;
   A.items.forEach((it, i) => { html += trainItem(it, i); });
   html += `<button class="btn ghost block add-live" data-act="add-ex">${icon('plus')}${esc(t('addExercise'))}</button>`;
   html += `<div class="train-foot"><button class="btn primary block big" data-act="finish">${icon('check')}${esc(t('finishSession'))}</button>
@@ -874,6 +889,7 @@ function renderProfile() {
       ${program().id !== 'foundations' ? `<button class="btn small ghost" data-act="program" data-id="foundations">${esc(t('backToFoundations'))}</button>` : ''}</section>
     <section class="card"><div class="card-head"><h2>Health Connect</h2>${chip(hs.on ? 'good' : 'info', hs.on ? t('on') : t('off'))}</div>
       ${hcBody()}</section>
+    ${watchCard()}
     <section class="card"><div class="card-head"><h2>Tanjur</h2>${S.tanjur ? chip('good', t('linked')) : chip('warn', t('notLinked'))}</div>
       <p class="muted small">${esc(S.tanjur ? t('tanjurLinkedAbout', { time: S.tanjur.at ? shortDate(dkey(new Date(S.tanjur.at))) + ', ' + clock(new Date(S.tanjur.at)) : '' }) : U.tanjur === false ? t('tanjurMissing') : U.tjState === 'refused' ? t('tanjurRefused') : t('tanjurNotYet'))}</p>
       <p class="muted small">${esc(AIC.available() ? t('aiKeysShared', { spent: (monthUsage(S.aiUsage).cost).toFixed(3), cap: AIC.cap() ? '$' + AIC.cap() : t('noLimit') }) : t('aiKeysNotShared'))}</p>
@@ -881,12 +897,44 @@ function renderProfile() {
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.5 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.6 · ${esc(t('aboutLine'))}</p>`;
 }
 function weightField() {
   const w = weightSource();
   if (w && w.src !== 'manual') return `<div class="field"><span>${esc(t('weightKg'))}</span><div class="readonly-val"><b>${n1(w.kg)} kg</b><small>${esc(t(w.src === 'tanjur' ? 'weightFromTanjur' : 'weightFromHcShort', { date: w.date ? shortDate(w.date) : '' }))}</small></div></div>`;
   return `<label class="field"><span>${esc(t('weightKg'))}</span><input id="pf-kg" type="number" inputmode="decimal" step="0.1" value="${esc(S.profile.kg ?? '')}"><small class="muted">${esc(t('weightManual'))}</small></label>`;
+}
+/* Amazfit watches can't pair with other apps: the watch syncs to Zepp, Zepp writes to Health Connect, PoKreni reads from there. */
+const atText = iso => { const d = new Date(iso); return isNaN(d) ? '' : `${shortDate(dkey(d))}, ${clock(d)}`; };
+function watchStats() {
+  const k = today(), st = PK.stepsSummary(S.hc.steps, k), sl = S.hc.sleep && S.hc.sleep[k], hr = S.hc.rhr && S.hc.rhr.date >= addDays(k, -2) ? S.hc.rhr : null;
+  const cells = [];
+  if (st.today || st.avg) cells.push(`<div><div class="stat-num">${n0(st.today)}</div><div class="stat-lab">${esc(t('stepsToday'))}${st.avg ? ` · ${esc(t('stepsAvg', { n: n0(st.avg) }))}` : ''}</div></div>`);
+  if (sl) cells.push(`<div><div class="stat-num">${n1(sl)}<small> h</small></div><div class="stat-lab">${esc(t('sleepLast'))}</div></div>`);
+  if (hr) cells.push(`<div><div class="stat-num">${hr.bpm}<small> bpm</small></div><div class="stat-lab">${esc(t(hr.low ? 'hrLowest' : 'hrResting'))}</div></div>`);
+  return cells.length ? `<div class="watch-stats">${cells.join('')}</div>` : '';
+}
+function watchCard() {
+  if (!Native.Bridge && !PK.watchStatus(S.hc)) return '';
+  const ws = PK.watchStatus(S.hc), hs = S.settings.health || {};
+  const head = `<div class="card-head"><h2 class="ic-h">${icon('watch')}${esc(t('watchTitle'))}</h2>${ws ? chip('good', t('watchOn')) : chip('info', t('watchNotYet'))}</div>`;
+  /* Heart rate is new in 1.6, so people who connected earlier still need to allow it. */
+  const missing = hs.on && Native.Bridge ? HC_PERMS.filter(p => /READ_(STEPS|HEART_RATE|RESTING_HEART_RATE|SLEEP|EXERCISE)$/.test(p) && !(S.hc.granted || []).includes(p)) : [];
+  const btns = `${missing.length ? `<p class="banner warn">${icon('info')}${esc(t('watchAllowMore'))}</p><button class="btn primary block" data-act="hc-connect" style="margin-bottom:8px">${esc(t('hcAskAgain'))}</button>` : ''}
+    <div class="row2"><button class="btn" data-act="zepp">${esc(t('openZepp'))}</button>${hs.on ? `<button class="btn ghost" data-act="hc-sync" ${U.hcBusy ? 'disabled' : ''}>${icon('sync')}${esc(U.hcBusy ? t('syncing') : t('syncNow'))}</button>` : `<button class="btn primary" data-act="hc-connect">${esc(t('hcConnect'))}</button>`}</div>`;
+  const notif = `<details class="watch-tip"><summary>${esc(t('watchNotifTitle'))}</summary><p class="small">${esc(t('watchNotif'))}</p></details>`;
+  if (ws) return `<section class="card watch">${head}<p class="muted small">${esc(t('watchSeen', { app: ws.app, at: atText(ws.last) }))}</p>${watchStats()}
+    <p class="muted small">${esc(t('watchCounts'))}</p>${btns}${notif}</section>`;
+  return `<section class="card watch">${head}<p class="small">${esc(t('watchIntro'))}</p>
+    <ol class="cues watch-steps"><li>${esc(t('watchStep1'))}</li><li>${esc(t('watchStep2'))}</li><li>${esc(t(hs.on ? 'watchStep3On' : 'watchStep3'))}</li><li>${esc(t('watchStep4'))}</li></ol>
+    ${btns}<p class="muted small">${esc(t('watchNote'))}</p>${notif}</section>`;
+}
+/* Today: steps, sleep and heart rate when Health Connect has any (from the watch or the phone). */
+function watchStrip() {
+  if (!S.settings.health || !S.settings.health.on) return '';
+  const cells = watchStats(); if (!cells) return '';
+  const ws = PK.watchStatus(S.hc);
+  return `<section class="card watch-strip" data-act="watch-open" role="button" tabindex="0"><div class="card-head"><h2 class="ic-h">${icon(ws ? 'watch' : 'heart')}${esc(t(ws ? 'watchToday' : 'healthToday'))}</h2>${icon('right', 'chev')}</div>${cells}</section>`;
 }
 function hcBody() {
   const hs = S.settings.health || {};
@@ -1004,6 +1052,38 @@ function mediaBlock(id) {
     <input type="file" id="clip-rec" data-id="${id}" accept="video/*" capture="environment" hidden><input type="file" id="clip-pick" data-id="${id}" accept="video/*,image/gif" hidden></div>`;
   return `<div class="ex-media">${tabs}${box}${foot}${clipTools}</div>`;
 }
+/* The question "Ask the coach" starts with on an exercise: how to do it, and how heavy (or how many, how long) for you. */
+function exAsk(ex) {
+  const name = tx(ex.name);
+  if (ex.kind === 'cardio') return t('exAskCardio', { name });
+  if (ex.kind === 'time') return t('exAskTime', { name });
+  if (ex.kind === 'bw') return t('exAskBw', { name });
+  return t('exAskLoad', { name });
+}
+/* Search: what an exercise can be found by besides its names, i.e. the body-map muscles it trains (both languages). */
+const exExtra = e => { const m = BODY.EXM[e.id]; return m ? m.p.concat(m.s).map(id => BODY.byId[id] ? `${BODY.byId[id].en} ${BODY.byId[id].hr}` : '').join(' ') : ''; };
+const searchBox = (id, val) => `<label class="search">${icon('search')}<input type="search" id="${id}" value="${esc(val || '')}" placeholder="${esc(t('searchEx'))}" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="${esc(t('searchEx'))}"></label>`;
+/* Show only the rows (by data-id) that match; filtering in place keeps the keyboard up while typing. */
+function filterRows(root, rows, ids, noneEl, q) {
+  const keep = new Set(ids);
+  let shown = 0;
+  rows.forEach(r => { const on = keep.has(r.dataset.id); (r.closest('li') || r).hidden = !on; if (on) shown++; });
+  if (noneEl) { noneEl.hidden = shown > 0; noneEl.textContent = shown ? '' : t('searchNone', { q: q.trim() }); }
+}
+function addExList(g, q) {
+  const base = EX.list.filter(e => e.kind !== 'cardio' && BODY.EXM[e.id]);
+  if (q && q.trim()) return PK.searchExercises(base, q, exExtra);
+  return base.filter(e => g === 'all' || BODY.groupById[g].m.some(m => BODY.EXM[e.id].p.includes(m)));
+}
+function applyAddFilter() {
+  const sb = $('#sheetBody'); if (!sb) return;
+  const q = U.addQ || '', ids = addExList(U.addGroup || 'all', q).map(e => e.id);
+  filterRows(sb, $$('.pick-list [data-act="add-pick"]', sb), ids, $('#add-none'), q);
+}
+function applyLibFilter() {
+  const q = U.libQ || '', ids = PK.searchExercises(EX.list, q, exExtra).map(e => e.id);
+  filterRows($('#learnLib'), $$('#lib-list [data-id]'), ids, $('#lib-none'), q);
+}
 const SHEETS = {
   ex({ id }) {
     const ex = EX.byId[id]; if (!ex) return {};
@@ -1016,9 +1096,19 @@ const SHEETS = {
       <h3>${esc(t('howTo'))}</h3><ol class="cues">${tx(ex.cues).map(c => `<li>${esc(c)}</li>`).join('')}</ol>
       ${tx(ex.mistakes).length ? `<h3>${esc(t('commonMistakes'))}</h3><ul class="cues warn">${tx(ex.mistakes).map(c => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
       ${rel ? `<div class="chips wrap">${rel}</div>` : ''}
-      <div class="row2">${ex.kind !== 'cardio' && BODY.EXM[id] && PK.injuryHit(id, S.injuries, BODY).level !== 'avoid' ? `<button class="btn small" data-act="add-ex" data-id="${id}">${icon('plus')}${esc(t(S.active ? 'addToSession' : 'addToToday'))}</button>` : ''}<button class="btn small ghost" data-act="coach" data-q="${esc(tx(ex.name))}: ">${icon('chat')}${esc(t('askAboutThis'))}</button></div>
+      <div class="row2">${ex.kind !== 'cardio' && BODY.EXM[id] && PK.injuryHit(id, S.injuries, BODY).level !== 'avoid' ? `<button class="btn small" data-act="add-ex" data-id="${id}">${icon('plus')}${esc(t(S.active ? 'addToSession' : 'addToToday'))}</button>` : ''}<button class="btn small ghost" data-act="coach" data-q="${esc(exAsk(ex))}">${icon('chat')}${esc(t('askAboutThis'))}</button></div>
       ${lift && (lift.kg != null || lift.reps || lift.secs) ? `<h3>${esc(t('nextTime'))}</h3><p>${lift.kg != null ? n1(lift.kg) + ' kg' : ''}${lift.reps ? ' × ' + lift.reps : ''}${lift.secs ? ' · ' + lift.secs + ' s' : ''}</p>` : ''}
       ${hist.length ? `<h3>${esc(t('recent'))}</h3><ul class="mini-hist">${hist.map(h => `<li><span>${esc(shortDate(h.date))}</span><span>${h.kg ? n1(h.kg) + ' kg × ' : ''}${h.reps || (h.secs ? h.secs + ' s' : '')}</span></li>`).join('')}</ul>` : ''}` };
+  },
+  /* A warm-up move explained: drawing, why it helps, how to do it, and the full exercise guide (videos, your clip) one tap away. */
+  warm({ id }) {
+    const w = PR.WARMUP.find(x => x.id === id); if (!w) return {};
+    const draw = w.move && ANIM && MOVES[w.move] ? `<div class="ex-media"><div class="media-box draw"><svg class="move" viewBox="0 0 ${ANIM.W} ${ANIM.H}" data-move="${w.move}" role="img" aria-label="${esc(t('media_draw'))}"></svg></div></div>` : '';
+    return { title: tx(w), sub: t('warmup'), body: `${draw}
+      <p class="warm-why">${esc(tx(w.why))}</p>
+      <h3>${esc(t('howTo'))}</h3><ol class="cues">${tx(w.steps).map(c => `<li>${esc(c)}</li>`).join('')}</ol>
+      <div class="row2">${w.ex ? `<button class="btn small" data-act="ex" data-id="${w.ex}">${icon('video')}${esc(t('warmFull'))}</button>` : ''}<button class="btn small ghost" data-act="coach" data-q="${esc(t('warmAsk', { name: tx(w) }))}">${icon('chat')}${esc(t('askAboutThis'))}</button></div>
+      ${w.ex && w.ex !== w.move ? `<p class="muted small">${esc(t('warmSameAs', { name: exName(w.ex) }))}</p>` : ''}` };
   },
   swap({ i }) {
     const it = S.active && S.active.items[i]; if (!it) return {};
@@ -1028,10 +1118,12 @@ const SHEETS = {
       <span class="thumb">${EX.byId[o].img ? `<img src="img/ex/${o}_0.jpg" alt="">` : icon('go')}</span><span class="plan-main"><span class="plan-name">${esc(exName(o))}</span><span class="plan-meta">${esc(tx(EX.byId[o].muscles))}</span></span></button></li>`).join('')}</ul>` };
   },
   checkin() {
+    /* If Health Connect knows last night's sleep (e.g. from the watch), start from that answer. */
+    const hs = S.hc.sleep && S.hc.sleep[today()], short = hs != null && hs < 6;
     return { title: t('checkinTitle'), sub: tx(todayTemplate().name), body: `
-      <div class="field"><span>${esc(t('sleepQ'))}</span><div class="seg" id="ciSleep"><button data-act="ci" data-k="sleep" data-v="ok" aria-pressed="true">${esc(t('sleepOk'))}</button><button data-act="ci" data-k="sleep" data-v="short" aria-pressed="false">${esc(t('sleepShort'))}</button></div></div>
+      <div class="field"><span>${esc(t('sleepQ'))}</span><div class="seg" id="ciSleep"><button data-act="ci" data-k="sleep" data-v="ok" aria-pressed="${!short}">${esc(t('sleepOk'))}</button><button data-act="ci" data-k="sleep" data-v="short" aria-pressed="${short}">${esc(t('sleepShort'))}</button></div>${hs != null ? `<small class="muted">${esc(t('sleepFromHc', { h: n1(hs) }))}</small>` : ''}</div>
       <div class="field"><span>${esc(t('painQ'))}</span><div class="seg" id="ciPain"><button data-act="ci" data-k="pain" data-v="no" aria-pressed="true">${esc(t('painNo'))}</button><button data-act="ci" data-k="pain" data-v="yes" aria-pressed="false">${esc(t('painYes'))}</button></div></div>
-      <p class="muted small" id="ciNote">${esc(t('checkinNote'))}</p>
+      <p class="muted small" id="ciNote">${esc(t(short ? 'checkinLighter' : 'checkinNote'))}</p>
       <p class="banner crit">${icon('flag')}${esc(t('stopRule'))}</p>
       <button class="btn primary block big" data-act="begin">${icon('go')}${esc(t('letsGo'))}</button>` };
   },
@@ -1139,17 +1231,19 @@ const SHEETS = {
     const live = !!S.active, tpl = live ? null : todayTemplate();
     const custom = live ? !!S.active.custom : !!tpl.custom, tplName = tx(live ? S.active.name : tpl.name);
     const have = new Set(live ? S.active.items.map(i => i.ex) : planFor(tpl, false).map(x => x.ex.id));
-    const g = U.addGroup || 'all', pick = U.addPick;
+    const g = U.addGroup || 'all', pick = U.addPick, q = U.addQ || '';
     const groups = ['all', 'chest', 'back', 'shoulders', 'arms', 'legs', 'glutes', 'core'];
-    const list = EX.list.filter(e => e.kind !== 'cardio' && BODY.EXM[e.id] && (g === 'all' || BODY.groupById[g].m.some(m => BODY.EXM[e.id].p.includes(m))));
+    const list = EX.list.filter(e => e.kind !== 'cardio' && BODY.EXM[e.id]), show = new Set(addExList(g, q).map(e => e.id));
     const bar = pick ? `<div class="add-bar"><div class="add-bar-name">${icon('check')}<b>${esc(exName(pick))}</b></div><div class="row2">${live
       ? `<button class="btn primary" data-act="add-ex-do" data-k="live">${esc(t('addToSession'))}</button>${custom ? '' : `<button class="btn" data-act="add-ex-do" data-k="live-always">${esc(t('addLiveAlways', { name: tplName }))}</button>`}`
       : `<button class="btn primary" data-act="add-ex-do" data-k="today">${esc(t('addJustToday'))}</button>${custom ? '' : `<button class="btn" data-act="add-ex-do" data-k="always">${esc(t('addAlways', { name: tplName }))}</button>`}`}</div></div>` : `<p class="muted small">${esc(t('addHint'))}</p>`;
     return { title: t('addExercise'), sub: live ? t('addLiveSub') : t('addSub', { name: tplName }), body: `
-      <div class="chips wrap">${groups.map(x => `<button class="chip-btn ${g === x ? 'on' : ''}" data-act="add-grp" data-v="${x}" aria-pressed="${g === x}">${esc(x === 'all' ? t('grpAll') : tx(BODY.groupById[x]))}</button>`).join('')}</div>
+      ${searchBox('add-q', q)}
+      <div class="chips wrap" id="add-grps">${groups.map(x => `<button class="chip-btn ${g === x && !q.trim() ? 'on' : ''}" data-act="add-grp" data-v="${x}" aria-pressed="${g === x && !q.trim()}">${esc(x === 'all' ? t('grpAll') : tx(BODY.groupById[x]))}</button>`).join('')}</div>
       ${bar}
+      <p class="muted small search-none" id="add-none" ${show.size ? 'hidden' : ''}>${show.size ? '' : esc(t('searchNone', { q: q.trim() }))}</p>
       <ul class="pick-list">${list.map(e => { const hit = PK.injuryHit(e.id, S.injuries, BODY), blocked = hit.level === 'avoid', inSes = have.has(e.id);
-        return `<li><button class="plan-row ${pick === e.id ? 'picked' : ''}" data-act="add-pick" data-id="${e.id}" ${blocked || inSes ? 'disabled' : ''}>
+        return `<li ${show.has(e.id) ? '' : 'hidden'}><button class="plan-row ${pick === e.id ? 'picked' : ''}" data-act="add-pick" data-id="${e.id}" ${blocked || inSes ? 'disabled' : ''}>
         <span class="thumb">${e.img ? `<img src="img/ex/${e.id}_0.jpg" alt="" loading="lazy">` : icon('go')}</span>
         <span class="plan-main"><span class="plan-name">${esc(tx(e.name))}</span><span class="plan-meta ${blocked ? 'inj-text' : ''}">${esc(blocked ? t('addBlocked', { area: areasText(hit.areas) }) : inSes ? t('alreadyIn') : tx(e.muscles))}</span></span>${pick === e.id ? icon('check', 'pick-ic') : ''}</button></li>`; }).join('')}</ul>` };
   },
@@ -1229,6 +1323,10 @@ async function syncHealth(manual) {
   const k = today();
   try { const st = await B.status(); S.hc.granted = st.granted || []; } catch (e) { /* keep last */ }
   const has = p => (S.hc.granted || []).includes('android.permission.health.' + p);
+  /* Which apps wrote what, and when (shows whether the watch is coming through Zepp). Times are kept as UTC ISO so they compare as text. */
+  const isoOf = v => { const ms = Date.parse(v); return isNaN(ms) ? '' : new Date(Math.min(ms, Date.now())).toISOString(); };
+  if (!S.hc.sources || typeof S.hc.sources !== 'object') S.hc.sources = {};
+  const seen = (list, kind) => list.forEach(x => { const app = x.sourceId || x.sourceName; if (!app || app === PKG_SELF) return; const key = app + '|' + kind, at = isoOf(x.endDate || x.startDate); if (at > (S.hc.sources[key] || '')) S.hc.sources[key] = at; });
   if (H && has('READ_WEIGHT')) {
     try {
       const r = await H.readSamples({ dataType: 'weight', startDate: new Date(parseKey(addDays(k, -60))).toISOString(), endDate: new Date().toISOString(), limit: 200, ascending: false });
@@ -1240,19 +1338,56 @@ async function syncHealth(manual) {
     try {
       const from = parseKey(addDays(k, -1)); from.setHours(18, 0, 0, 0);
       const r = await H.readSamples({ dataType: 'sleep', startDate: from.toISOString(), endDate: new Date().toISOString(), limit: 50 });
-      const mins = (r && r.samples || []).reduce((a, s) => a + (+s.value || 0), 0);
+      const list = (r && r.samples) || [];
+      const mins = list.reduce((a, s) => a + (+s.value || 0), 0);
       S.hc.sleep = { [k]: mins ? Math.round(mins / 6) / 10 : null };
+      seen(list, 'sleep');
     } catch (e) { /* skip */ }
   }
   if (has('READ_NUTRITION')) {
     try { const r = await B.readNutritionDays({ from: addDays(k, -7), to: k }); const p = {}; (r.days || []).forEach(d => { p[d.date] = { protein: d.protein, kcal: d.kcal }; }); S.hc.protein = p; } catch (e) { /* skip */ }
   }
+  if (H && has('READ_STEPS')) {
+    try {
+      const r = await H.queryAggregated({ dataType: 'steps', startDate: parseKey(addDays(k, -6)).toISOString(), endDate: new Date().toISOString(), bucket: 'day', aggregation: 'sum' });
+      const st = {};
+      (r && r.samples || []).forEach(b => { const v = Math.round(+b.value || 0); if (v > 0) st[dkey(new Date(b.startDate))] = v; });
+      S.hc.steps = st;
+    } catch (e) { /* skip */ }
+    try { const r = await H.readSamples({ dataType: 'steps', startDate: parseKey(addDays(k, -1)).toISOString(), endDate: new Date().toISOString(), limit: 30, ascending: false }); seen((r && r.samples) || [], 'steps'); } catch (e) { /* skip */ }
+  }
+  /* Resting heart rate if the watch app records one; otherwise the lowest heart rate of the last day with data. */
+  if (H && has('READ_RESTING_HEART_RATE')) {
+    try {
+      const r = await H.readSamples({ dataType: 'restingHeartRate', startDate: parseKey(addDays(k, -7)).toISOString(), endDate: new Date().toISOString(), limit: 10, ascending: false });
+      const s = (r && r.samples || [])[0];
+      S.hc.rhr = s && +s.value > 25 ? { bpm: Math.round(+s.value), date: dkey(new Date(s.startDate)), low: false } : null;
+      seen((r && r.samples) || [], 'heart');
+    } catch (e) { /* skip */ }
+  }
+  if (H && has('READ_HEART_RATE')) {
+    try { const r = await H.readSamples({ dataType: 'heartRate', startDate: parseKey(addDays(k, -1)).toISOString(), endDate: new Date().toISOString(), limit: 5, ascending: false }); seen((r && r.samples) || [], 'heart'); } catch (e) { /* skip */ }
+    if (!S.hc.rhr || S.hc.rhr.low) {
+      try {
+        const r = await H.queryAggregated({ dataType: 'heartRate', startDate: parseKey(addDays(k, -1)).toISOString(), endDate: new Date().toISOString(), bucket: 'day', aggregation: 'min' });
+        const b = (r && r.samples || []).filter(x => +x.value > 25).pop();
+        S.hc.rhr = b ? { bpm: Math.round(+b.value), date: dkey(new Date(b.startDate)), low: true } : null;
+      } catch (e) { /* skip */ }
+    }
+  }
   if (has('READ_EXERCISE')) {
     try {
       const r = await B.readSessions({ start: new Date(parseKey(addDays(weekStart(k), -63))).toISOString(), end: new Date().toISOString() });
-      const ext = {};
-      (r.sessions || []).forEach(s => { if (s.app === PKG_SELF) return; const d = dkey(new Date(s.start)); ext[d] = (ext[d] || 0) + Math.round((Date.parse(s.end) - Date.parse(s.start)) / 60000); });
+      const ext = {}, list = [];
+      (r.sessions || []).forEach(s => {
+        if (s.app === PKG_SELF) return;
+        const d = dkey(new Date(s.start)), mins = Math.round((Date.parse(s.end) - Date.parse(s.start)) / 60000);
+        ext[d] = (ext[d] || 0) + mins;
+        if (d >= addDays(k, -13)) list.push({ date: d, start: s.start, mins, app: s.app, title: s.title || '' });
+        const key = s.app + '|workout', at = isoOf(s.end); if (at > (S.hc.sources[key] || '')) S.hc.sources[key] = at;
+      });
       S.hc.ext = ext;
+      S.hc.extList = list.sort((a, b) => (a.start < b.start ? 1 : -1)).slice(0, 10);
     } catch (e) { /* skip */ }
   }
   S.hc.syncedAt = Date.now(); U.hcBusy = false;
@@ -1301,7 +1436,8 @@ function openCoach(prefill) {
   closeAllSheets();
   if (prefill) U.coachDraft = prefill;
   setTab('coach');
-  setTimeout(() => { const i = $('#coachInput'); if (i && prefill) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 80);
+  /* The composer is built once, so put the question in it directly as well (it may already be on the page). */
+  setTimeout(() => { const i = $('#coachInput'); if (i && prefill) { i.value = prefill; i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 80);
 }
 const COACH_CHIPS = ['qProgress', 'qBuild', 'qLeast', 'qBack', 'qPreGym', 'qSore', 'qShort'];
 function renderCoach() {
@@ -1435,6 +1571,10 @@ async function openTanjur(path) {
   if (!Native.Bridge) { toast(t('tanjurPhone')); return; }
   try { const r = await Native.Bridge.openUrl({ url }); if (!r.opened) { U.tanjur = false; toast(t('tanjurMissing')); } else U.tanjur = true; } catch (e) { toast(t('tanjurMissing')); }
 }
+async function openZepp() {
+  if (!Native.Bridge) { toast(t('hcWeb')); return; }
+  try { const r = await Native.Bridge.openApp({ pkg: PKG_ZEPP }); if (!r.opened) toast(t('zeppMissing')); else if (r.store) toast(t('zeppStore')); } catch (e) { toast(t('zeppMissing')); }
+}
 async function checkTanjur() { if (!Native.Bridge) return; try { const r = await Native.Bridge.isInstalled({ pkg: PKG_TANJUR }); U.tanjur = !!r.installed; } catch (e) { /* unknown */ } }
 
 /* ---------- deep links: pokreni://today, pokreni://train, pokreni://cardio, pokreni://learn ---------- */
@@ -1508,8 +1648,8 @@ function handleAct(act, b) {
     case 'vid-save': { const inp = $('#vid-url'), v = ytId(inp && inp.value); if (!v) { toast(t('videoBad')); break; }
       S.settings.videos = Object.assign({}, S.settings.videos, { [id]: v }); U.vidEdit = null; persist(); renderSheet(); toast(t('videoSaved')); break; }
     case 'vid-reset': if (S.settings.videos) { delete S.settings.videos[id]; persist(); } U.vidEdit = null; renderSheet(); break;
-    case 'add-ex': U.addPick = id && EX.byId[id] ? id : null; U.addGroup = 'all'; openSheet('addex'); break;
-    case 'add-grp': U.addGroup = b.dataset.v; renderSheet(); break;
+    case 'add-ex': U.addPick = id && EX.byId[id] ? id : null; U.addGroup = 'all'; U.addQ = ''; openSheet('addex'); break;
+    case 'add-grp': U.addGroup = b.dataset.v; U.addQ = ''; renderSheet(); break;
     case 'add-pick': U.addPick = id; renderSheet(); break;
     case 'add-ex-do': { const k = b.dataset.k, pickId = U.addPick; if (!pickId) break; U.addPick = null;
       if (k === 'live' || k === 'live-always') addLive(pickId, k === 'live-always'); else addToPlan(pickId, k); break; }
@@ -1540,6 +1680,9 @@ function handleAct(act, b) {
     case 'checkin': break;
     case 'ci': { const g = b.parentElement; $$('button', g).forEach(x => x.setAttribute('aria-pressed', String(x === b))); const light = $('#ciSleep [data-v="short"]').getAttribute('aria-pressed') === 'true' || $('#ciPain [data-v="yes"]').getAttribute('aria-pressed') === 'true'; $('#ciNote').textContent = light ? t('checkinLighter') : t('checkinNote'); break; }
     case 'begin': { const short = $('#ciSleep [data-v="short"]').getAttribute('aria-pressed') === 'true', pain = $('#ciPain [data-v="yes"]').getAttribute('aria-pressed') === 'true'; beginSession(short || pain, pain); break; }
+    case 'warm-info': openSheet('warm', { id }); break;
+    case 'zepp': openZepp(); break;
+    case 'watch-open': setTab('profile'); setTimeout(() => { const c = $('#view-profile .card.watch'); if (c) c.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 120); break;
     case 'warm-toggle': S.active.warmOpen = !S.active.warmOpen; persist(); renderTrain(); break;
     case 'ti-toggle': { const it = S.active.items[+b.dataset.i]; it.open = !it.open; persist(); renderTrain(); break; }
     case 'set-done': toggleSet(+b.dataset.i, +b.dataset.j); break;
@@ -1637,6 +1780,13 @@ function bindEvents() {
   document.addEventListener('input', e => {
     const el = e.target; if (!el) return;
     if (el.id === 'coachInput') { U.coachDraft = el.value; return; }
+    if (el.id === 'add-q') {
+      U.addQ = el.value;
+      /* Searching looks through every group, so the group chips let go while you type. */
+      $$('#add-grps .chip-btn').forEach(c => { const on = !el.value.trim() && c.dataset.v === (U.addGroup || 'all'); c.classList.toggle('on', on); c.setAttribute('aria-pressed', String(on)); });
+      applyAddFilter(); return;
+    }
+    if (el.id === 'lib-q') { U.libQ = el.value; applyLibFilter(); return; }
     if (el.id === 'c-min') { readCardioDraft(); const k = $('#c-kcal'); if (k) k.textContent = t('kcalEst', { kcal: n0(cardioKcal(U.draftC)) }); }
     if (el.id === 'rBpS' || el.id === 'rBpD') { if (U.draftR) { U.draftR.bpSys = num($('#rBpS').value); U.draftR.bpDia = num($('#rBpD').value); } }
   });

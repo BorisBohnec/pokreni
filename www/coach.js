@@ -105,6 +105,14 @@
     } else L.push('Recent sessions: none yet.');
     const lifts = Object.keys(D.lifts || {}).map(id => { const l = D.lifts[id]; return `${exn(id)} ${l.kg != null ? r1(l.kg) + ' kg' : ''}${l.reps ? ' × ' + l.reps : ''}${l.secs ? ' ' + l.secs + ' s' : ''}`.trim(); });
     if (lifts.length) L.push(`Next-time targets the app set: ${lifts.join('; ')}.`);
+    /* Exercises the question names: their whole history, so "what weight should I use" has something to go on. */
+    PK.exercisesIn(o.question || '', EX.list).slice(0, 3).forEach(e => {
+      if (e.kind === 'cardio') return;
+      const h = PK.liftHistory(D, e.id).slice(-8).reverse(), l = (D.lifts || {})[e.id];
+      const kind = { load: 'weight × reps', bw: 'bodyweight reps', time: 'hold in seconds', carry: 'weight × seconds' }[e.kind] || e.kind;
+      if (h.length) L.push(`They asked about ${en(e.name)} (${kind}${e.step ? `, usual jump ${e.step} kg` : ''}${e.side ? ', counted per side' : ''}). Best set per session, newest first: ${h.map(x => `${x.date} ${x.kg ? r1(x.kg) + ' kg × ' : ''}${x.reps || (x.secs ? x.secs + ' s' : '')}`).join('; ')}.${l && l.kg != null ? ` The app's next target: ${r1(l.kg)} kg${l.reps ? ' × ' + l.reps : ''}.` : ''}`);
+      else L.push(`They asked about ${en(e.name)} (${kind}${e.step ? `, usual jump ${e.step} kg` : ''}${e.side ? ', counted per side' : ''}) and haven't logged it yet. For a starting weight, give a cautious range from their body weight, sex, age and similar lifts above if known, and tell them how to check it: the first set should feel like 3-4 reps left in the tank (RIR 3-4).`);
+    });
 
     const B = o.B;
     if (B) {
@@ -148,8 +156,14 @@
       if (T.today === today && (T.meals || []).length) L.push(`Meals today: ${T.meals.map(m => `${m.time} ${m.name} ${m.kcal} kcal P ${m.protein} g`).join('; ')}.`);
     } else L.push('Food: Tanjur data not available.');
     const H = D.hc || {};
+    const ws = PK.watchStatus(H), via = ws ? `from their ${ws.app} watch via Health Connect` : 'Health Connect';
     const sleep = H.sleep && H.sleep[today];
-    if (sleep) L.push(`Sleep last night (Health Connect): ${sleep} h.`);
+    if (sleep) L.push(`Sleep last night (${via}): ${sleep} h.`);
+    const st = PK.stepsSummary(H.steps, today);
+    if (st.today || st.avg) L.push(`Steps (${via}): ${st.today} so far today${st.avg ? `; ${st.avg} a day on average over the ${st.days} days before` : ''}.`);
+    if (H.rhr && H.rhr.date >= PK.addDays(today, -2)) L.push(`${H.rhr.low ? 'Lowest heart rate' : 'Resting heart rate'} ${H.rhr.bpm} bpm (${H.rhr.date}, ${via}).`);
+    const ext = (H.extList || []).filter(x => x.date >= PK.addDays(today, -13));
+    if (ext.length) L.push(`Workouts other apps recorded, last 14 days (already counted in active minutes): ${ext.map(x => `${x.date} ${x.title || 'workout'} ${x.mins} min (${PK.appName(x.app)})`).join('; ')}.`);
     if (D.active) L.push(`A session is in progress right now: ${en(D.active.name)}.`);
 
     const links = `Lesson ids: ${LS.list.map(l => `${l.id} ${en(l.title)}`).join('; ')}.\nExercise ids: ${EX.list.map(e => `${e.id} (${en(e.name)})`).join('; ')}.`;

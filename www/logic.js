@@ -410,9 +410,60 @@
     return m ? m[1] : '';
   }
 
+  /* ---------- Health Connect sources ---------- */
+  /* Apps that write to Health Connect, by package. Zepp is the app Amazfit watches sync through. */
+  const HC_APPS = { 'com.huami.watch.hmwatchmanager': 'Zepp (Amazfit)', 'com.xiaomi.hm.health': 'Zepp Life', 'com.sec.android.app.shealth': 'Samsung Health',
+    'com.google.android.apps.fitness': 'Google Fit', 'com.fitbit.FitbitMobile': 'Fitbit', 'com.garmin.android.apps.connectmobile': 'Garmin Connect', 'com.strava': 'Strava',
+    'app.tanjur.tracker': 'Tanjur', 'app.pokreni.trainer': 'PoKreni', 'com.google.android.apps.healthdata': 'Health Connect', android: 'Android' };
+  const ZEPP = ['com.huami.watch.hmwatchmanager', 'com.xiaomi.hm.health'];
+  const appName = pkg => HC_APPS[pkg] || String(pkg || '').split('.').filter(x => !/^(com|app|android|apps|google|www)$/.test(x)).slice(-1)[0] || '?';
+  /* What the watch (through Zepp) has sent lately: the newest record time per data kind, or null if nothing from Zepp yet.
+     hc.sources keys are "package|kind" (kind: steps, sleep, heart, workout), values the newest record's ISO time. */
+  function watchStatus(hc) {
+    const src = (hc && hc.sources) || {};
+    const seen = Object.keys(src).filter(k => ZEPP.includes(k.split('|')[0]));
+    if (!seen.length) return null;
+    const kinds = {}; let last = '';
+    seen.forEach(k => { const kind = k.split('|')[1]; if (src[k] > (kinds[kind] || '')) kinds[kind] = src[k]; if (src[k] > last) last = src[k]; });
+    return { last, kinds, app: appName(seen[0].split('|')[0]) };
+  }
+  /* Steps: today's count and the average of the days before it that have any (up to 6). */
+  function stepsSummary(steps, today) {
+    const S = steps || {};
+    const prev = Object.keys(S).filter(k => k < today && k >= addDays(today, -6) && S[k] > 0);
+    return { today: S[today] || 0, avg: prev.length ? Math.round(prev.reduce((a, k) => a + S[k], 0) / prev.length) : 0, days: prev.length };
+  }
+
+  /* ---------- search ---------- */
+  /* Lower case without accents (č→c, đ→d), so "cucanj" finds "Čučanj". */
+  function fold(s) { return String(s || '').toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+  /* Everything an exercise can be found by: both names, both muscle lines, its id, movement pattern and equipment, plus extra words (body-map muscle names). */
+  function exerciseHay(e, extra) {
+    return fold([e.id.replace(/_/g, ' '), e.name && e.name.en, e.name && e.name.hr, e.muscles && e.muscles.en, e.muscles && e.muscles.hr, e.pattern, e.equip, extra || ''].join(' ').replace(/-/g, ' '));
+  }
+  /* Exercises that contain every word typed (in any order, either language). An empty query keeps the whole list. */
+  function searchExercises(list, q, extra) {
+    const words = fold(q).replace(/-/g, ' ').split(/\s+/).filter(Boolean);
+    if (!words.length) return list.slice();
+    return list.filter(e => { const hay = exerciseHay(e, extra ? extra(e) : ''); return words.every(w => hay.includes(w)); });
+  }
+  /* Exercises named in a sentence (either language). A name inside a longer named one ("push-up" in "incline push-up") is dropped. */
+  function exercisesIn(text, list) {
+    const s = ' ' + fold(text).replace(/[^a-z0-9]+/g, ' ') + ' ';
+    const norm = n => fold(n).replace(/\([^)]*\)/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+    const hits = [];
+    list.forEach(e => {
+      const names = [e.name.en, e.name.hr].map(norm).filter(n => n.length > 2);
+      const n = names.filter(x => s.includes(' ' + x + ' ')).sort((a, b) => b.length - a.length)[0];
+      if (n) hits.push({ e, n });
+    });
+    return hits.filter(h => !hits.some(o => o !== h && o.n.length > h.n.length && o.n.includes(h.n))).map(h => h.e);
+  }
+
   return { ytId, pad, dkey, isKey, parseKey, addDays, daysBetween, weekStart, clamp, num, READINESS_QS, bpHigh, readiness,
     sessionsIn, setsFor, roundKg, target, painZone, evaluate, activeKcal, STRENGTH_MET, sessionMinutes, finisherMinutes,
     weekStats, weeksBack, autoCheck, retestStatus, liftHistory,
     muscleSets, muscleLevel, RANKS, RANK_SETS, rankFor, muscleRanks, leastTrained,
-    injuryHit, defaultItem, adjustForInjuries, focusActive, focusWeek, pickFocusExercise, buildWorkout, validateWorkout, validateFocus, groupsIn };
+    injuryHit, defaultItem, adjustForInjuries, focusActive, focusWeek, pickFocusExercise, buildWorkout, validateWorkout, validateFocus, groupsIn,
+    fold, searchExercises, exercisesIn, HC_APPS, ZEPP, appName, watchStatus, stepsSummary };
 });

@@ -414,6 +414,33 @@ class HcBridgePlugin : Plugin() {
         call.resolve(JSObject().put("opened", opened))
     }
 
+    /** { pkg } opens another app (e.g. Zepp for the watch), or its Play Store page when it isn't installed.
+     *  Needs a <queries><package/></queries> entry. Resolves { opened, store }. */
+    @PluginMethod
+    fun openApp(call: PluginCall) {
+        val pkg = call.getString("pkg")
+        if (pkg.isNullOrBlank()) { call.reject("pkg is required", "ARGS"); return }
+        val launch = context.packageManager.getLaunchIntentForPackage(pkg)
+        if (launch != null) {
+            try {
+                context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                call.resolve(JSObject().put("opened", true).put("store", false))
+                return
+            } catch (e: Exception) {
+                // fall through to the store page
+            }
+        }
+        val opened = listOf("market://details?id=$pkg", "https://play.google.com/store/apps/details?id=$pkg").any { url ->
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                true
+            } catch (e: Exception) {
+                false
+            }
+        }
+        call.resolve(JSObject().put("opened", opened).put("store", true))
+    }
+
     /** { pkg } needs a matching <queries><package/></queries> entry in the app manifest. */
     @PluginMethod
     fun isInstalled(call: PluginCall) {

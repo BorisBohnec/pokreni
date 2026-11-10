@@ -28,6 +28,9 @@
       frames: [{ anchor: 'a1', at: [140, 156], t: 166, l1: 62, s1: -12, ik2: [92, 182], p2: 90 }, { anchor: 'a1', at: [140, 156], l1: 0, s1: 0, l2: 28, s2: -24, p2: 70 }] },
     db_rdl: { props: [F].concat(DB),
       frames: [{ anchor: 'a1', at: [124, 182] }, { anchor: 'a1', at: [124, 182], t: 108, l1: 25, s1: -4, a1: 0, f1: 0 }] },
+    /* Warm-up only: the same hinge with hands on hips (arm angles are relative to the trunk, so the hands stay put). */
+    hip_hinge: { props: [F],
+      frames: [{ anchor: 'a1', at: [124, 182], rel: true, a1: -35, f1: 47 }, { anchor: 'a1', at: [124, 182], rel: true, t: 108, l1: 25, s1: -4, a1: -35, f1: 47 }] },
     glute_bridge: { props: [F],
       frames: [{ anchor: 'neck', at: [64, 177], t: -90, hd: -90, ik1: [178, 181], a1: 92, f1: 92 }, { anchor: 'neck', at: [64, 177], t: -58, hd: -90, ik1: [178, 181], a1: 100, f1: 92 }] },
     hip_thrust: { props: [F, { k: 'rect', x: 8, y: 130, w: 62, h: 56 }, { k: 'disc', j: 'hip', off: [0, -13], r: 10 }],

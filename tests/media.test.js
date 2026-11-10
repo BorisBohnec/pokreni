@@ -8,11 +8,12 @@ const ANIM = require('../www/anim.js');
 const MOVES = require('../www/data/moves.js');
 const VIDEOS = require('../www/data/videos.js');
 const EX = require('../www/data/exercises.js');
+const PR = require('../www/data/programs.js');
 
 test('every strength exercise has a drawing that renders cleanly at every moment', () => {
   for (const e of EX.list) if (e.kind !== 'cardio') assert.ok(MOVES[e.id], 'no drawing for ' + e.id);
   for (const [id, spec] of Object.entries(MOVES)) {
-    assert.ok(EX.byId[id], 'unknown exercise ' + id);
+    assert.ok(EX.byId[id] || PR.WARMUP.some(w => w.move === id), 'unknown exercise ' + id);
     for (let p = 0; p < 1; p += 0.05) {
       const svg = ANIM.frameSVG(spec, p);
       assert.doesNotMatch(svg, /NaN|undefined|Infinity/, `${id} at ${p.toFixed(2)}`);
@@ -73,4 +74,16 @@ test('animations move naturally: short way round, nothing through the floor, joi
   /* the dead bug's arm goes back overhead (+84°), never forward through the floor */
   const db = MOVES.dead_bug, mid = ANIM.poseAt(db, 0.125);
   assert.ok(mid.a1 > 180 && mid.a1 < 270, 'dead bug arm passes overhead');
+});
+
+test('every warm-up move explains itself and links to real drawings and exercises', () => {
+  for (const w of PR.WARMUP) {
+    for (const L of ['en', 'hr']) {
+      assert.ok(w[L] && w.why && w.why[L], `${w.id} ${L} text`);
+      assert.ok(w.steps && w.steps[L] && w.steps[L].length >= 3, `${w.id} ${L} steps`);
+    }
+    assert.equal(w.steps.en.length, w.steps.hr.length, w.id + ' steps match in both languages');
+    if (w.move) assert.ok(MOVES[w.move], w.id + ' drawing');
+    if (w.ex) assert.ok(EX.byId[w.ex], w.id + ' exercise');
+  }
 });
