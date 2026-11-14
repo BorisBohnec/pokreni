@@ -58,19 +58,17 @@ test('your choices win: hide, count anyway, rename', () => {
   assert.equal(v[0].dupOf.id, 'c1');
 });
 
-test('chat memory: when to summarise, what is pending, and the summary text', () => {
-  const now = Date.parse('2026-11-14T18:00:00Z'), h = 3600000;
+test('chat memory: only saved when asked, and only the unsaved part', () => {
+  const now = Date.parse('2026-11-14T18:00:00Z');
   const m = (role, at, text) => ({ role, at, text: text || role });
-  const C = { msgs: [m('user', now - 10 * 60000, 'How heavy should I squat?'), m('coach', now - 9 * 60000, 'Start at 12 kg <workout>{}</workout>')], mem: [], memOn: true, sumAt: 0, backlog: [] };
-  assert.equal(COACH.shouldSummarize(C, now, false), false, 'a fresh short chat waits');
-  assert.equal(COACH.shouldSummarize(C, now, true), true, 'a new chat saves it');
-  assert.equal(COACH.shouldSummarize(C, now + 2 * h, false), true, 'a quiet chat is saved');
-  assert.equal(COACH.shouldSummarize(Object.assign({}, C, { memOn: false }), now, true), false);
-  assert.equal(COACH.shouldSummarize({ msgs: [m('user', now)], mem: [], sumAt: 0 }, now + 3 * h, true), false, 'needs an answer too');
-  const long = Object.assign({}, C, { msgs: Array.from({ length: 8 }, (_, i) => m(i % 2 ? 'coach' : 'user', now - (8 - i) * 60000)) });
-  assert.equal(COACH.shouldSummarize(long, now, false), true, '8 messages');
-  assert.equal(COACH.pendingMsgs(Object.assign({}, C, { sumAt: now - 9.5 * 60000 })).length, 1);
-  assert.equal(COACH.pendingMsgs({ msgs: [], backlog: C.msgs, sumAt: now }).length, 2, 'a cleared chat waits in the backlog');
+  const C = { msgs: [m('user', now - 10 * 60000, 'How heavy should I squat?'), m('coach', now - 9 * 60000, 'Start at 12 kg <workout>{}</workout>')], mem: [], memOn: true, sumAt: 0 };
+  assert.equal(COACH.canSave(C), true);
+  assert.equal(COACH.canSave({ msgs: [m('user', now)], mem: [], sumAt: 0 }), false, 'needs an answer too');
+  const saved = Object.assign({}, C, { sumAt: now - 9 * 60000 });
+  assert.equal(COACH.canSave(saved), false, 'nothing new since the last save');
+  saved.msgs = saved.msgs.concat([m('user', now - 60000, 'And lunges?'), m('coach', now, 'Bodyweight first.')]);
+  assert.deepEqual(COACH.pendingMsgs(saved).map(x => x.text), ['And lunges?', 'Bodyweight first.']);
+  assert.equal(typeof COACH.shouldSummarize, 'undefined', 'no automatic saving');
   const p = COACH.summaryPrompt(C.msgs, [{ text: '- Wants to squat 20 kg by spring' }], 'hr');
   assert.ok(p.includes('in Croatian') && p.includes('Person: How heavy should I squat?') && p.includes('[workout card]') && p.includes('Already remembered:\n- Wants to squat 20 kg'));
   assert.equal(COACH.cleanSummary('Sure! Here it is:\n- Goal: squat 20 kg\n* Left knee 3/10 on stairs\n- Gym 3x a week\n- Mornings\n- Fifth point'), '- Goal: squat 20 kg\n- Left knee 3/10 on stairs\n- Gym 3x a week\n- Mornings');
@@ -78,14 +76,18 @@ test('chat memory: when to summarise, what is pending, and the summary text', ()
   assert.equal(COACH.cleanSummary(''), '');
 });
 
-test('remembered summaries go into the coach prompt, newest that fit, oldest first', () => {
+test('memory goes into the prompt in your order, top first, cut from the bottom', () => {
   const mem = Array.from({ length: 30 }, (_, i) => ({ id: 'm' + i, from: '2026-10-' + String(i + 1).padStart(2, '0'), to: '2026-10-' + String(i + 1).padStart(2, '0'), text: `- note ${i} ` + 'x'.repeat(80) }));
-  const lines = COACH.memoryLines({ mem, memOn: true });
-  assert.ok(lines.length <= 1800 && lines.includes('note 29') && !lines.includes('note 0 '));
-  assert.ok(lines.indexOf('note 28') < lines.indexOf('note 29'));
+  const C = { mem, memOn: true }, used = COACH.memoryUsed(C), lines = COACH.memoryLines(C);
+  assert.ok(used > 5 && used < 30);
+  assert.ok(lines.length <= 2400 && lines.includes('note 0 ') && lines.includes(`note ${used - 1} `) && !lines.includes(`note ${used} `));
+  assert.ok(lines.indexOf('note 0 ') < lines.indexOf('note 1 '), 'top note first');
+  const moved = { mem: [mem[29]].concat(mem.slice(0, 29)), memOn: true };
+  assert.ok(COACH.memoryLines(moved).startsWith('2026-10-30:\n- note 29'), 'a note dragged to the top is used first');
   assert.equal(COACH.memoryLines({ mem, memOn: false }), '');
+  assert.equal(COACH.memoryUsed({ mem, memOn: false }), 0);
   const D = { profile: {}, readiness: null, baselines: [], program: { id: 'foundations', next: 0 }, lifts: {}, cardio: [], sessions: [], injuries: [], hc: {},
     coach: { msgs: [], mem: [{ id: 'a', from: '2026-11-10', to: '2026-11-11', text: '- Left knee aches on stairs (3/10)\n- Agreed to box squats for two weeks' }], memOn: true } };
   const prompt = COACH.buildPrompt(D, { today: '2026-11-14', appLang: 'en', question: 'Can I squat normally again?', EX, LS, PR, B, lessonDone: () => false, nextTemplate: null }).prompt;
-  assert.ok(prompt.includes('What you remember from earlier chats') && prompt.includes('2026-11-10 to 2026-11-11:\n- Left knee aches on stairs'));
+  assert.ok(prompt.includes('most important first') && prompt.includes('2026-11-10 to 2026-11-11:\n- Left knee aches on stairs'));
 });

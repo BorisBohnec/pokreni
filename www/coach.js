@@ -195,7 +195,7 @@ Data:
 ${L.join('\n')}
 
 ${links}${catalogue}
-${memory ? `\nWhat you remember from earlier chats (your own summaries, oldest first). Use them when they help and refer back naturally; don't recite them, and where they disagree with the data above, the data wins:\n${memory}\n` : ''}${hist ? `\nConversation so far (oldest first):\n${hist}\n` : ''}
+${memory ? `\nWhat you remember from earlier chats (notes the person chose to save and put in order of importance, most important first). Use them when they help and refer back naturally; don't recite them, and where they disagree with the data above, the data wins:\n${memory}\n` : ''}${hist ? `\nConversation so far (oldest first):\n${hist}\n` : ''}
 New question: ${String(o.question || '').slice(0, 1500)}`;
     return { prompt, lang };
   }
@@ -222,26 +222,22 @@ New question: ${String(o.question || '').slice(0, 1500)}`;
     return { html: out.join(''), links };
   }
 
-  /* ---------- memory: short summaries of earlier chats ---------- */
-  const MEM_MAX = 40, MEM_PROMPT_CHARS = 1800, QUIET = 2 * 3600000;
+  /* ---------- memory: summaries of chats you chose to save ---------- */
+  /* coach.mem is in your order of importance: the top one first. Only what fits MEM_PROMPT_CHARS goes into a question,
+     counted from the top, so notes far down the list are the ones left out. */
+  const MEM_MAX = 40, MEM_PROMPT_CHARS = 2400;
   const plainMsg = t => String(t || '').replace(/<workout>[\s\S]*?<\/workout>/gi, '[workout card]').replace(/<focus>[\s\S]*?<\/focus>/gi, '[focus block card]');
-  /* Messages not summarised yet: a cleared chat waiting for its summary (backlog), then the chat after the last summary. */
+  /* The part of the chat not saved to memory yet (after the last save). */
   function pendingMsgs(coach) {
     const at = (coach && coach.sumAt) || 0;
-    return ((coach && coach.backlog) || []).concat(((coach && coach.msgs) || []).filter(m => (m.role === 'user' || m.role === 'coach') && m.at > at));
+    return ((coach && coach.msgs) || []).filter(m => (m.role === 'user' || m.role === 'coach') && m.at > at);
   }
-  /* Summarise once there's a question and an answer: right away for a new chat (force), otherwise after 8 messages
-     or once the chat has been quiet for 2 hours. */
-  function shouldSummarize(coach, now, force) {
-    if (!coach || coach.memOn === false) return false;
-    const p = pendingMsgs(coach);
-    if (!p.some(m => m.role === 'user') || !p.some(m => m.role === 'coach')) return false;
-    return !!force || p.length >= 8 || now - p[p.length - 1].at >= QUIET;
-  }
+  /* Saving needs at least a question and an answer that aren't saved yet. Nothing is saved on its own. */
+  function canSave(coach) { const p = pendingMsgs(coach); return p.some(m => m.role === 'user') && p.some(m => m.role === 'coach'); }
   function summaryPrompt(msgs, mem, lang) {
     const chat = msgs.slice(-30).map(m => `${m.role === 'user' ? 'Person' : 'Coach'}: ${plainMsg(m.text).replace(/\[\[(lesson|ex):[^\]]+\]\]/g, '').slice(0, 700)}`).join('\n');
-    const prev = (mem || []).slice(-3).map(x => x.text).join('\n');
-    return `You keep the memory of the training coach inside the PoKreni app. Summarise the chat below so the coach can pick up where it left off in a later chat.
+    const prev = (mem || []).slice(0, 3).map(x => x.text).join('\n');
+    return `You keep the memory of the training coach inside the PoKreni app. The person asked to save this chat, so summarise it for the coach to pick up in a later chat.
 Write 1-4 bullet points, each starting with "- ", in ${lang === 'hr' ? 'Croatian' : 'English'}, under 70 words in total. Nothing else.
 Keep only what will still matter later: goals and plans, decisions and what they agreed to try, pain or injuries they mentioned, preferences, and the key advice given (with numbers such as weights, reps or minutes). Skip greetings and small talk. Don't add anything that wasn't said, and don't repeat what is already remembered.
 ${prev ? `Already remembered:\n${prev}\n` : ''}
@@ -255,17 +251,16 @@ ${chat}`;
     if (!lines.length && s) lines = ['- ' + s.replace(/\s+/g, ' ')];
     return lines.slice(0, 4).map(l => l.slice(0, 240)).join('\n').slice(0, 800);
   }
-  /* The newest summaries that fit the prompt, oldest first. */
-  function memoryLines(coach) {
-    if (!coach || coach.memOn === false) return '';
-    const out = []; let n = 0;
-    for (const m of (coach.mem || []).slice().reverse()) {
-      const line = `${m.from === m.to ? m.from : `${m.from} to ${m.to}`}:\n${m.text}`;
-      if (n + line.length > MEM_PROMPT_CHARS) break;
-      out.unshift(line); n += line.length;
-    }
-    return out.join('\n');
+  /* How many notes, from the top, fit into a question. */
+  function memoryUsed(coach) {
+    if (!coach || coach.memOn === false) return 0;
+    let n = 0, i = 0;
+    for (const m of coach.mem || []) { const len = memLine(m).length + 1; if (n + len > MEM_PROMPT_CHARS) break; n += len; i++; }
+    return i;
   }
+  const memLine = m => `${m.from === m.to ? m.from : `${m.from} to ${m.to}`}:\n${m.text}`;
+  /* The notes that fit, most important first. */
+  function memoryLines(coach) { return (coach && coach.mem || []).slice(0, memoryUsed(coach)).map(memLine).join('\n'); }
 
-  return { buildPrompt, renderAnswer, detectLang, extractBlocks, wantsWorkout, MEM_MAX, pendingMsgs, shouldSummarize, summaryPrompt, cleanSummary, memoryLines };
+  return { buildPrompt, renderAnswer, detectLang, extractBlocks, wantsWorkout, MEM_MAX, pendingMsgs, canSave, summaryPrompt, cleanSummary, memoryUsed, memoryLines };
 });

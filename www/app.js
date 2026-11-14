@@ -59,6 +59,7 @@ const ICONS = {
   minus: '<path d="M5 12h14"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
   video: '<rect x="3" y="6.5" width="12.5" height="11" rx="2.5"/><path d="M15.5 10.5 21 7.5v9l-5.5-3"/>',
+  grip: '<path stroke-width="3" d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"/>',
   search: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/>',
   watch: '<rect x="6.5" y="6.5" width="11" height="11" rx="3"/><path d="M9 6.5 9.6 3h4.8l.6 3.5M9 17.5l.6 3.5h4.8l.6-3.5M12 9.5V12l1.5 1"/>',
   upload: '<path d="M12 15.5V4.5M7.5 9 12 4.5 16.5 9M5 15v4.5h14V15"/>',
@@ -97,7 +98,7 @@ const S = {
   program: { id: 'foundations', next: 0 }, lifts: {}, sessions: [], cardio: [], active: null,
   settings: { health: { on: false }, remind: { on: false, time: '16:30' } },
   hc: { weight: null, sleep: {}, steps: {}, protein: {}, extAll: null, rhr: null, sources: {}, syncedAt: 0, granted: [] },
-  tanjur: null, coach: { msgs: [], mem: [], memOn: true, sumAt: 0, backlog: [] }, aiUsage: null,
+  tanjur: null, coach: { msgs: [], mem: [], memOn: true, sumAt: 0, memV: 2 }, aiUsage: null,
   injuries: [], focus: null, workouts: [], planned: null, extras: {}, todayExtra: null,
   savedAt: 0
 };
@@ -121,9 +122,11 @@ function applyData(d) {
   S.tanjur = d.tanjur && d.tanjur.app === 'tanjur' ? d.tanjur : null;
   if (S.tanjur) delete S.tanjur.ai;
   const dc = d.coach || {};
-  /* mem: summaries of earlier chats the coach remembers; sumAt: newest message already summarised; backlog: a cleared chat still to summarise. */
-  S.coach = { msgs: Array.isArray(dc.msgs) ? dc.msgs.slice(-40) : [], mem: Array.isArray(dc.mem) ? dc.mem.filter(m => m && m.text).slice(-COACH.MEM_MAX) : [],
-    memOn: dc.memOn !== false, sumAt: +dc.sumAt || 0, backlog: Array.isArray(dc.backlog) ? dc.backlog.slice(-30) : [] };
+  /* mem: notes saved from chats, in your order of importance (top first); sumAt: newest message already saved.
+     1.7 kept them oldest first (memV missing), so they're flipped once to put the newest on top. */
+  const mem = Array.isArray(dc.mem) ? dc.mem.filter(m => m && m.text) : [];
+  S.coach = { msgs: Array.isArray(dc.msgs) ? dc.msgs.slice(-40) : [], mem: (dc.memV === 2 ? mem : mem.reverse()).slice(0, COACH.MEM_MAX),
+    memOn: dc.memOn !== false, sumAt: +dc.sumAt || 0, memV: 2 };
   S.aiUsage = d.aiUsage && d.aiUsage.month ? d.aiUsage : null;
   S.injuries = Array.isArray(d.injuries) ? d.injuries.filter(x => x && BODY.byId[x.area] && (x.level === 'ease' || x.level === 'avoid')) : [];
   S.focus = d.focus && BODY.byId[d.focus.muscle] && EX.byId[d.focus.ex] ? d.focus : null;
@@ -396,7 +399,6 @@ function safely(fn, sel) {
 function setTab(tab) {
   if (tab === 'train' && !S.active) tab = 'today';
   U.tab = tab; window.scrollTo(0, 0); scheduleRender();
-  if (tab === 'coach') summarizeChat(false);
 }
 function paintChrome() {
   $('#langBtn').textContent = LANG === 'hr' ? 'EN' : 'HR';
@@ -931,7 +933,7 @@ function renderProfile() {
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.7 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.7.1 · ${esc(t('aboutLine'))}</p>`;
 }
 function weightField() {
   const w = weightSource();
@@ -1140,6 +1142,18 @@ const SHEETS = {
       <div class="row2">${ex.kind !== 'cardio' && BODY.EXM[id] && PK.injuryHit(id, S.injuries, BODY).level !== 'avoid' ? `<button class="btn small" data-act="add-ex" data-id="${id}">${icon('plus')}${esc(t(S.active ? 'addToSession' : 'addToToday'))}</button>` : ''}<button class="btn small ghost" data-act="coach" data-q="${esc(exAsk(ex))}">${icon('chat')}${esc(t('askAboutThis'))}</button></div>
       ${lift && (lift.kg != null || lift.reps || lift.secs) ? `<h3>${esc(t('nextTime'))}</h3><p>${lift.kg != null ? n1(lift.kg) + ' kg' : ''}${lift.reps ? ' × ' + lift.reps : ''}${lift.secs ? ' · ' + lift.secs + ' s' : ''}</p>` : ''}
       ${hist.length ? `<h3>${esc(t('recent'))}</h3><ul class="mini-hist">${hist.map(h => `<li><span>${esc(shortDate(h.date))}</span><span>${h.kg ? n1(h.kg) + ' kg × ' : ''}${h.reps || (h.secs ? h.secs + ' s' : '')}</span></li>`).join('')}</ul>` : ''}` };
+  },
+  /* A memory note: the new summary to check before it's kept, or one you saved earlier, to edit or delete. */
+  mem({ id }) {
+    const m = id ? S.coach.mem.find(x => x.id === id) : U.memDraft;
+    if (!m) return { title: t('memTitle'), body: `<p class="muted">${esc(t('memGone'))}</p>` };
+    const range = m.from === m.to ? shortDate(m.from) : `${shortDate(m.from)} – ${shortDate(m.to)}`;
+    const pos = id ? S.coach.mem.findIndex(x => x.id === id) + 1 : 0;
+    return { title: t(id ? 'memEditTitle' : 'memNewTitle'), sub: id ? `${pos}. · ${range}` : range, body: `
+      <p class="muted small">${esc(t(id ? 'memEditHint' : 'memNewHint'))}</p>
+      <label class="field"><span>${esc(t('memNoteLabel'))}</span><textarea id="mem-text" rows="6" maxlength="800">${esc(m.text)}</textarea></label>
+      <button class="btn primary block" data-act="mem-keep" data-id="${esc(id || '')}">${icon('check')}${esc(t(id ? 'save' : 'memSave'))}</button>
+      ${id ? `<button class="btn ghost block danger" data-act="mem-del" data-id="${esc(id)}">${icon('trash')}${esc(t('memDel'))}</button>` : `<button class="btn ghost block" data-act="sheet-close">${esc(t('cancel'))}</button>`}` };
   },
   /* Removing an exercise from the session you're doing: says what goes with it (logged sets) and offers to stop adding a kept one. */
   tirm({ i }) {
@@ -1536,7 +1550,7 @@ function renderCoach() {
   $('#coachSrc').innerHTML = chipS;
   $('#coachSetup').innerHTML = AIC.available() ? '' : `<section class="card callout warn"><h2>${esc(t('coachSetupTitle'))}</h2><p class="small">${esc(t(S.tanjur ? 'coachSetupBody' : 'coachSetupNoTanjur'))}</p>
     <div class="row2"><button class="btn" data-act="tanjur" data-path="ai">${esc(t('openTanjur'))}</button><button class="btn ghost" data-act="tj-refresh">${icon('sync')}${esc(t('refresh'))}</button></div></section>`;
-  $('#coachMem').innerHTML = coachMemCard();
+  if (!U.memDrag) $('#coachMem').innerHTML = coachMemCard();
   const msgs = S.coach.msgs;
   let html = '';
   if (!msgs.length) html += `<div class="coach-intro"><p>${esc(t('coachIntro'))}</p><div class="chips wrap">${COACH_CHIPS.map(k => `<button class="chip-btn" data-act="coach-ask" data-q="${esc(t(k))}">${esc(t(k))}</button>`).join('')}</div></div>`;
@@ -1553,7 +1567,12 @@ function renderCoach() {
     } else html += `<div class="msg err"><div class="bubble">${icon('alert')}${esc(m.text)}</div></div>`;
   });
   if (U.coachBusy) html += `<div class="msg coach"><div class="bubble thinking"><span class="dots3"><i></i><i></i><i></i></span>${esc(t('thinking'))}<button class="btn small ghost" data-act="coach-stop">${esc(t('stop'))}</button></div></div>`;
-  if (msgs.length && !U.coachBusy) html += `<div class="chat-tools"><button class="btn small ghost" data-act="coach-clear">${icon('plus')}${esc(t('newChat'))}</button></div>`;
+  if (msgs.length && !U.coachBusy) {
+    const save = U.sumBusy ? `<button class="btn small" disabled>${esc(t('memSummarising'))}</button>`
+      : COACH.canSave(S.coach) ? `<button class="btn small primary" data-act="mem-save">${icon('book')}${esc(t('memSave'))}</button>`
+        : S.coach.sumAt && msgs.some(m => m.at <= S.coach.sumAt) ? chip('good', t('memSavedChip')) : '';
+    html += `<div class="chat-tools">${save}<button class="btn small ghost danger" data-act="coach-clear">${icon('trash')}${esc(t('delChat'))}</button></div>`;
+  }
   $('#coachMsgs').innerHTML = html;
   const send = $('#coachSend'); if (send) send.disabled = !!U.coachBusy;
 }
@@ -1596,43 +1615,109 @@ function coachCardAct(act, at, ci) {
   persist(); renderCoach();
 }
 /* ---------- coach memory ---------- */
-/* Saves a short summary of the chat (or a cleared one waiting in backlog) so later chats can build on it. Runs in the
-   background: after 8 new messages, when a chat has been quiet for 2 hours, or right away for a new chat (force). */
-async function summarizeChat(force) {
+/* Nothing is remembered on its own: "Save to memory" has the AI summarise the unsaved part of the chat, you check or
+   edit the note, and it goes to the top of the list. The list is in your order of importance (drag to change it). */
+async function saveChatToMemory() {
   const C = S.coach;
-  if (U.sumBusy || U.coachBusy || !AIC.available() || !COACH.shouldSummarize(C, Date.now(), force)) return false;
+  if (U.sumBusy || U.coachBusy || !COACH.canSave(C)) return;
+  if (C.mem.length >= COACH.MEM_MAX) { toast(t('memFull', { n: COACH.MEM_MAX })); return; }
+  if (!AIC.available()) { toast(t('coachNoKeys')); return; }
   const msgs = COACH.pendingMsgs(C), upto = msgs[msgs.length - 1].at;
-  U.sumBusy = true; if (U.tab === 'coach') renderCoach();
-  let ok = false;
+  U.sumBusy = true; renderCoach();
   try {
     const lang = COACH.detectLang(msgs.filter(m => m.role === 'user').map(m => m.text).join(' '), LANG);
     const r = await AIC.text(COACH.summaryPrompt(msgs, C.mem, lang), { maxTokens: 300, temperature: 0.2 });
     const text = COACH.cleanSummary(r.text);
-    if (text) C.mem = C.mem.concat([{ id: uid(), at: Date.now(), from: dkey(new Date(msgs[0].at)), to: dkey(new Date(upto)), text }]).slice(-COACH.MEM_MAX);
-    C.backlog = []; C.sumAt = Math.max(C.sumAt || 0, upto); ok = !!text;
-  } catch (e) { /* tried again later: when the chat is quiet or the next new chat */ }
-  U.sumBusy = false; persist(); if (U.tab === 'coach') renderCoach();
-  return ok;
+    if (!text) throw { code: 'empty' };
+    U.memDraft = { text, from: dkey(new Date(msgs[0].at)), to: dkey(new Date(upto)), upto };
+    openSheet('mem', {});
+  } catch (e) { toast(aiErr(e)); }
+  U.sumBusy = false; renderCoach();
 }
-function newChat() {
-  const C = S.coach;
-  if (C.memOn) C.backlog = COACH.pendingMsgs(C).slice(-30);
-  C.msgs = []; C.sumAt = Date.now();
+/* Keeps the note from the sheet: a new one goes to the top, an edited one stays where it is. */
+function keepMemNote(id) {
+  const C = S.coach, el = $('#mem-text'), text = COACH.cleanSummary(el ? el.value : '');
+  if (!text) { toast(t('memEmptyNote')); return; }
+  if (id) { const m = C.mem.find(x => x.id === id); if (m) m.text = text; }
+  else if (U.memDraft) {
+    const d = U.memDraft;
+    C.mem.unshift({ id: uid(), at: Date.now(), from: d.from, to: d.to, text });
+    C.sumAt = Math.max(C.sumAt || 0, d.upto); U.memDraft = null; U.memOpen = true;
+  }
   persist(); closeAllSheets(); renderCoach();
-  if (C.memOn && C.backlog.length) summarizeChat(true).then(ok => { if (ok) toast(t('memSaved')); });
+  toast(t(id ? 'memUpdated' : 'memSavedTop'));
 }
-/* What the coach remembers: one card, collapsed, above the chat. */
+function deleteMemNote(id) {
+  const C = S.coach, i = C.mem.findIndex(m => m.id === id); if (i < 0) return;
+  const [m] = C.mem.splice(i, 1);
+  persist(); closeAllSheets(); renderCoach();
+  toast(t('memDeleted'), { label: t('undo'), fn: () => { C.mem.splice(Math.min(i, C.mem.length), 0, m); persist(); renderCoach(); } });
+}
+function moveMemNote(from, to) {
+  const C = S.coach; if (from === to || from < 0 || from >= C.mem.length) return;
+  const [m] = C.mem.splice(from, 1); C.mem.splice(Math.max(0, Math.min(to, C.mem.length)), 0, m);
+  persist(); renderCoach();
+}
+/* What the coach remembers: one card above the chat. Top = most important; notes below the cut-off aren't sent. */
 function coachMemCard() {
-  const C = S.coach, mem = C.mem.slice().reverse();
+  const C = S.coach, mem = C.mem, used = COACH.memoryUsed(C);
   const range = m => (m.from === m.to ? shortDate(m.from) : `${shortDate(m.from)} – ${shortDate(m.to)}`);
   return `<details class="card coach-mem" ${U.memOpen ? 'open' : ''} id="coachMemBox"><summary><span class="ic-h">${icon('book')}${esc(t('memTitle'))}</span>
-      <span class="muted small">${U.sumBusy ? esc(t('memSaving')) : C.memOn ? esc(t('memCount', { n: mem.length })) : esc(t('off'))}</span></summary>
+      <span class="muted small">${C.memOn ? esc(t('memCount', { n: mem.length })) : esc(t('off'))}</span></summary>
     <p class="muted small">${esc(t('memAbout'))}</p>
     <label class="switch"><input type="checkbox" id="memOn" ${C.memOn ? 'checked' : ''}><span>${esc(t('memOn'))}</span></label>
-    ${mem.length ? `<ul class="mem-list">${mem.map(m => `<li><div class="mem-main"><div class="mem-date">${esc(range(m))}</div><div class="mem-text">${m.text.split('\n').map(l => `<p>${esc(l.replace(/^- /, ''))}</p>`).join('')}</div></div>
-      <button class="row-x" data-act="mem-del" data-id="${esc(m.id)}" aria-label="${esc(t('memDel'))}">${icon('x')}</button></li>`).join('')}</ul>
+    ${mem.length ? `${mem.length > 1 ? `<p class="muted small mem-order">${icon('grip')}${esc(t('memOrderHint'))}</p>` : ''}<ol class="mem-list" id="memList">${mem.map((m, i) => `<li class="${C.memOn && i >= used ? 'unused' : ''}" data-i="${i}">
+      <button class="mem-handle" data-i="${i}" aria-label="${esc(t('memDrag', { n: i + 1 }))}">${icon('grip')}</button>
+      <button class="mem-main" data-act="mem-edit" data-id="${esc(m.id)}"><span class="mem-date">${i + 1}. ${esc(range(m))}${C.memOn && i >= used ? ` · ${esc(t('memNotUsed'))}` : ''}</span><span class="mem-text">${m.text.split('\n').map(l => `<span>${esc(l.replace(/^- /, ''))}</span>`).join('')}</span></button>
+      <button class="row-x" data-act="mem-del" data-id="${esc(m.id)}" aria-label="${esc(t('memDel'))}">${icon('trash')}</button></li>`).join('')}</ol>
       <button class="btn small ghost danger" data-act="mem-forget">${icon('trash')}${esc(t('memForget'))}</button>` : `<p class="small">${esc(t('memEmpty'))}</p>`}
   </details>`;
+}
+/* Drag a note by its handle to put it higher or lower. Pointer events cover touch and mouse; the page scrolls when you
+   drag near the top or bottom edge. Arrow keys on the handle move it one place. */
+function initMemDrag() {
+  document.addEventListener('pointerdown', e => {
+    const h = e.target.closest && e.target.closest('.mem-handle'); if (!h || e.button > 0) return;
+    const li = h.closest('li'), list = li && li.parentElement; if (!list) return;
+    e.preventDefault();
+    const items = [...list.children], from = items.indexOf(li);
+    const top = el => el.getBoundingClientRect().top + window.scrollY;
+    const tops = items.map(top), hts = items.map(x => x.offsetHeight);
+    const gap = items.length > 1 ? tops[1] - tops[0] - hts[0] : 8, step = hts[from] + gap;
+    const y0 = e.clientY + window.scrollY;
+    let y = y0, to = from, raf = 0, edge = 0;
+    U.memDrag = true; li.classList.add('dragging'); list.classList.add('sorting');
+    try { h.setPointerCapture(e.pointerId); } catch (err) { /* optional */ }
+    const layout = () => {
+      const dy = y - y0, mid = tops[from] + hts[from] / 2 + dy;
+      to = from;
+      items.forEach((x, i) => { const c = tops[i] + hts[i] / 2; if (i < from && mid < c) to = Math.min(to, i); if (i > from && mid > c) to = Math.max(to, i); });
+      li.style.transform = `translateY(${dy}px)`;
+      items.forEach((x, i) => { if (i === from) return; const sh = from < to && i > from && i <= to ? -step : to < from && i >= to && i < from ? step : 0; x.style.transform = sh ? `translateY(${sh}px)` : ''; });
+    };
+    const tick = () => { if (edge) { window.scrollBy(0, edge); y += edge; layout(); } raf = edge ? requestAnimationFrame(tick) : 0; };
+    const move = ev => {
+      y = ev.clientY + window.scrollY; layout();
+      edge = ev.clientY < 90 ? -10 : ev.clientY > window.innerHeight - 150 ? 10 : 0;
+      if (edge && !raf) raf = requestAnimationFrame(tick);
+    };
+    const end = () => {
+      h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', end); h.removeEventListener('pointercancel', end);
+      edge = 0; if (raf) cancelAnimationFrame(raf);
+      items.forEach(x => { x.style.transform = ''; }); li.classList.remove('dragging'); list.classList.remove('sorting');
+      U.memDrag = false;
+      if (to !== from) moveMemNote(from, to); else renderCoach();
+    };
+    h.addEventListener('pointermove', move); h.addEventListener('pointerup', end); h.addEventListener('pointercancel', end);
+  });
+  document.addEventListener('keydown', e => {
+    const h = e.target.closest && e.target.closest('.mem-handle'); if (!h || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault();
+    const i = +h.dataset.i, j = e.key === 'ArrowUp' ? i - 1 : i + 1;
+    if (j < 0 || j >= S.coach.mem.length) return;
+    moveMemNote(i, j);
+    const nh = $(`#memList .mem-handle[data-i="${j}"]`); if (nh) nh.focus();
+  });
 }
 function scrollCoachEnd() { requestAnimationFrame(() => { const c = $('#coachMsgs'); if (c && c.lastElementChild) c.lastElementChild.scrollIntoView({ block: 'end', behavior: 'smooth' }); }); }
 async function askCoach(q) {
@@ -1659,7 +1744,6 @@ async function askCoach(q) {
   }
   U.coachBusy = null; S.coach.msgs = S.coach.msgs.slice(-40);
   persist(); if (U.tab === 'coach') { renderCoach(); scrollCoachEnd(); }
-  summarizeChat(false);
 }
 
 /* ---------- Tanjur ---------- */
@@ -1677,7 +1761,7 @@ async function readTanjur(force) {
         /* AI keys are kept in memory only: never in PoKreni's data file or backups. */
         U.ai = d.ai && typeof d.ai === 'object' ? d.ai : null; delete d.ai;
         U.tjUsage = d.aiUsage || null;
-        S.tanjur = d; U.tjState = 'ok'; U.tanjur = true; persist(); scheduleRender(); summarizeChat(false); return;
+        S.tanjur = d; U.tjState = 'ok'; U.tanjur = true; persist(); scheduleRender(); return;
       }
     }
     U.tjState = (r && r.reason) || 'missing';
@@ -1753,11 +1837,14 @@ function handleAct(act, b) {
     case 'coach-ask': askCoach(b.dataset.q); break;
     case 'coach-send': { const i = $('#coachInput'); askCoach(i ? i.value : ''); break; }
     case 'coach-stop': if (U.coachBusy) U.coachBusy.ctl.abort(); break;
-    case 'coach-clear': openSheet('confirm', { msg: t(S.coach.memOn ? 'newChatConfirm' : 'clearChatConfirm'), yes: t('newChat'), act: 'coach-clear-yes' }); break;
-    case 'coach-clear-yes': newChat(); break;
-    case 'mem-del': S.coach.mem = S.coach.mem.filter(m => m.id !== id); persist(); renderCoach(); break;
+    case 'coach-clear': openSheet('confirm', { msg: t(COACH.canSave(S.coach) ? 'delChatUnsaved' : 'delChatConfirm'), yes: t('delChat'), act: 'coach-clear-yes' }); break;
+    case 'coach-clear-yes': S.coach.msgs = []; S.coach.sumAt = Date.now(); persist(); closeAllSheets(); renderCoach(); break;
+    case 'mem-save': saveChatToMemory(); break;
+    case 'mem-keep': keepMemNote(id); break;
+    case 'mem-edit': openSheet('mem', { id }); break;
+    case 'mem-del': deleteMemNote(id); break;
     case 'mem-forget': openSheet('confirm', { msg: t('memForgetConfirm'), yes: t('memForget'), act: 'mem-forget-yes' }); break;
-    case 'mem-forget-yes': S.coach.mem = []; S.coach.backlog = []; S.coach.sumAt = Date.now(); persist(); closeAllSheets(); renderCoach(); toast(t('memForgotten')); break;
+    case 'mem-forget-yes': S.coach.mem = []; persist(); closeAllSheets(); renderCoach(); toast(t('memForgotten')); break;
     case 'reload': location.reload(); break;
     case 'go': if (S.active) setTab('train'); else startSession(); break;
     case 'bm-range': U.bmDays = +b.dataset.v === 28 ? 28 : 7; scheduleRender(); break;
@@ -1903,7 +1990,7 @@ function bindEvents() {
       case 'clip-rec': case 'clip-pick': saveClip(el.dataset.id, el.files && el.files[0]); return;
       case 'inj-note': { const inj = injuryOf(el.dataset.id); if (inj) { inj.note = el.value.trim().slice(0, 120); persist(); } break; }
       case 'pf-lang': setLang(el.value); break;
-      case 'memOn': S.coach.memOn = el.checked; if (!el.checked) S.coach.backlog = []; else S.coach.sumAt = Math.max(S.coach.sumAt, Date.now()); persist(); renderCoach(); break;
+      case 'memOn': S.coach.memOn = el.checked; persist(); renderCoach(); break;
       case 'pf-kg': { const v = num(el.value); S.profile.kg = v && v > 30 && v < 350 ? v : null; persist(); break; }
       case 'pf-rest': S.profile.restSec = +el.value; persist(); break;
       case 'pf-sound': S.profile.sound = el.checked; persist(); break;
@@ -1929,6 +2016,7 @@ function bindEvents() {
   });
   /* <details> open state survives re-renders (toggle doesn't bubble, so listen while capturing). */
   document.addEventListener('toggle', e => { if (e.target && e.target.id === 'coachMemBox') U.memOpen = e.target.open; }, true);
+  initMemDrag();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { flushSave(); return; }
     readTanjur(); syncHealth(false); checkTanjur();

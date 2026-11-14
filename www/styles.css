@@ -523,3 +523,19 @@ body.resting .app{padding-bottom:calc(190px + var(--sab))}
 .mem-date{font-size:12px;font-weight:650;color:var(--muted);margin-bottom:2px}
 .mem-text p{margin:2px 0;font-size:14px;line-height:1.35}
 .ext-actions{margin-bottom:16px}
+/* 1.7.1: memory notes you order by dragging */
+.mem-order{display:flex;align-items:center;gap:6px;margin:10px 0 0}
+.mem-order .ic{width:16px;height:16px;flex:none}
+.mem-list li{align-items:stretch;padding:4px 4px 4px 0;position:relative;background:var(--bg);border:1px solid var(--line)}
+.mem-handle{flex:none;width:36px;display:grid;place-items:center;color:var(--muted);cursor:grab;touch-action:none;border-radius:10px}
+.mem-handle .ic{width:20px;height:20px}
+.mem-handle:focus-visible{outline:2px solid var(--accent)}
+.mem-main{flex:1;min-width:0;text-align:left;padding:6px 2px;display:block}
+.mem-main .mem-date,.mem-main .mem-text{display:block}
+.mem-text span{display:block;margin:2px 0;font-size:14px;line-height:1.35}
+.mem-list li .row-x{align-self:center}
+.mem-list.sorting li{transition:transform .15s ease}
+.mem-list li.dragging{transition:none;z-index:2;box-shadow:0 10px 24px rgba(0,0,0,.25);border-color:var(--accent)}
+.mem-list li.dragging .mem-handle{cursor:grabbing;color:var(--accent)}
+.mem-list li.unused{opacity:.55}
+.chat-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
