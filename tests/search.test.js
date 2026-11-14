@@ -52,7 +52,7 @@ test('coach gets the asked exercise\'s history and the watch data', () => {
     sessions: [{ id: 's1', name: { en: 'A' }, date: '2026-11-03', start: '2026-11-03T15:00:00Z', end: '2026-11-03T16:00:00Z', items: [{ ex: 'goblet_squat', sets: [{ kg: 12, reps: 10, done: true }, { kg: 12, reps: 9, done: true }] }] },
       { id: 's2', name: { en: 'A' }, date: '2026-11-07', start: '2026-11-07T15:00:00Z', end: '2026-11-07T16:00:00Z', items: [{ ex: 'goblet_squat', sets: [{ kg: 14, reps: 8, done: true }] }] }],
     hc: { sleep: { '2026-11-10': 5.4 }, steps: { '2026-11-10': 4100, '2026-11-09': 9000 }, rhr: { bpm: 61, date: '2026-11-10', low: false },
-      extList: [{ date: '2026-11-08', start: '2026-11-08T09:00:00Z', mins: 42, app: 'com.huami.watch.hmwatchmanager', title: '' }],
+      extAll: [{ id: 'z1', date: '2026-11-08', start: '2026-11-08T09:00:00.000Z', end: '2026-11-08T09:42:00.000Z', mins: 42, app: 'com.huami.watch.hmwatchmanager', typeName: 'walking', title: '' }],
       sources: { 'com.huami.watch.hmwatchmanager|sleep': '2026-11-10T05:00:00.000Z' } },
     coach: { msgs: [] }
   };
@@ -60,7 +60,7 @@ test('coach gets the asked exercise\'s history and the watch data', () => {
   const p = COACH.buildPrompt(D, o('Explain the Goblet squat exercise and what weight you recommend for me.')).prompt;
   for (const s of ['They asked about Goblet squat', '2026-11-07 14 kg × 8; 2026-11-03 12 kg × 10', "The app's next target: 14 kg × 8",
     'Sleep last night (from their Zepp (Amazfit) watch via Health Connect): 5.4 h', 'Steps (from their Zepp (Amazfit) watch via Health Connect): 4100 so far today; 9000 a day',
-    'Resting heart rate 61 bpm', '2026-11-08 workout 42 min (Zepp (Amazfit))'])
+    'Resting heart rate 61 bpm', '2026-11-08 Walk 42 min (Zepp (Amazfit))'])
     assert.ok(p.includes(s), 'missing: ' + s);
   const q = COACH.buildPrompt(D, o('Explain the Hip thrust exercise and what weight you recommend for me.')).prompt;
   assert.ok(q.includes("They asked about Hip thrust (weight × reps, usual jump") && q.includes("haven't logged it yet"));

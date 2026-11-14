@@ -228,7 +228,41 @@ class HcBridgePlugin : Plugin() {
         }
     }
 
-    /** { start, end } ISO instants. Resolves { sessions: [{ id, clientId, app, title, type, start, end }] }. */
+    /** A readable name for the session type other apps (e.g. Zepp) wrote, so the apps don't depend on the numbers. */
+    private fun typeName(t: Int): String = when (t) {
+        ExerciseSessionRecord.EXERCISE_TYPE_WALKING -> "walking"
+        ExerciseSessionRecord.EXERCISE_TYPE_HIKING -> "hiking"
+        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING -> "running"
+        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL -> "running_treadmill"
+        ExerciseSessionRecord.EXERCISE_TYPE_BIKING -> "biking"
+        ExerciseSessionRecord.EXERCISE_TYPE_BIKING_STATIONARY -> "biking_stationary"
+        ExerciseSessionRecord.EXERCISE_TYPE_ELLIPTICAL -> "elliptical"
+        ExerciseSessionRecord.EXERCISE_TYPE_ROWING -> "rowing"
+        ExerciseSessionRecord.EXERCISE_TYPE_ROWING_MACHINE -> "rowing_machine"
+        ExerciseSessionRecord.EXERCISE_TYPE_STAIR_CLIMBING -> "stair_climbing"
+        ExerciseSessionRecord.EXERCISE_TYPE_STAIR_CLIMBING_MACHINE -> "stair_climbing_machine"
+        ExerciseSessionRecord.EXERCISE_TYPE_STRENGTH_TRAINING -> "strength_training"
+        ExerciseSessionRecord.EXERCISE_TYPE_WEIGHTLIFTING -> "weightlifting"
+        ExerciseSessionRecord.EXERCISE_TYPE_CALISTHENICS -> "calisthenics"
+        ExerciseSessionRecord.EXERCISE_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING -> "hiit"
+        ExerciseSessionRecord.EXERCISE_TYPE_STRETCHING -> "stretching"
+        ExerciseSessionRecord.EXERCISE_TYPE_YOGA -> "yoga"
+        ExerciseSessionRecord.EXERCISE_TYPE_PILATES -> "pilates"
+        ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL -> "swimming_pool"
+        ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_OPEN_WATER -> "swimming_open_water"
+        ExerciseSessionRecord.EXERCISE_TYPE_DANCING -> "dancing"
+        ExerciseSessionRecord.EXERCISE_TYPE_SOCCER -> "soccer"
+        ExerciseSessionRecord.EXERCISE_TYPE_BASKETBALL -> "basketball"
+        ExerciseSessionRecord.EXERCISE_TYPE_TENNIS -> "tennis"
+        ExerciseSessionRecord.EXERCISE_TYPE_BADMINTON -> "badminton"
+        ExerciseSessionRecord.EXERCISE_TYPE_TABLE_TENNIS -> "table_tennis"
+        ExerciseSessionRecord.EXERCISE_TYPE_MARTIAL_ARTS -> "martial_arts"
+        ExerciseSessionRecord.EXERCISE_TYPE_BOXING -> "boxing"
+        ExerciseSessionRecord.EXERCISE_TYPE_EXERCISE_CLASS -> "exercise_class"
+        else -> "other"
+    }
+
+    /** { start, end } ISO instants. Resolves { sessions: [{ id, clientId, app, title, type, typeName, start, end }] }. */
     @PluginMethod
     fun readSessions(call: PluginCall) {
         val start = call.getString("start")?.let { Instant.parse(it) }
@@ -245,6 +279,7 @@ class HcBridgePlugin : Plugin() {
                 o.put("app", r.metadata.dataOrigin.packageName)
                 o.put("title", r.title ?: "")
                 o.put("type", r.exerciseType)
+                o.put("typeName", typeName(r.exerciseType))
                 o.put("start", r.startTime.toString())
                 o.put("end", r.endTime.toString())
                 arr.put(o)

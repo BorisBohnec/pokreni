@@ -162,13 +162,14 @@
     const st = PK.stepsSummary(H.steps, today);
     if (st.today || st.avg) L.push(`Steps (${via}): ${st.today} so far today${st.avg ? `; ${st.avg} a day on average over the ${st.days} days before` : ''}.`);
     if (H.rhr && H.rhr.date >= PK.addDays(today, -2)) L.push(`${H.rhr.low ? 'Lowest heart rate' : 'Resting heart rate'} ${H.rhr.bpm} bpm (${H.rhr.date}, ${via}).`);
-    const ext = (H.extList || []).filter(x => x.date >= PK.addDays(today, -13));
-    if (ext.length) L.push(`Workouts other apps recorded, last 14 days (already counted in active minutes): ${ext.map(x => `${x.date} ${x.title || 'workout'} ${x.mins} min (${PK.appName(x.app)})`).join('; ')}.`);
+    const ext = H.extAll ? PK.extView(D, EX).filter(x => x.counted && x.date >= PK.addDays(today, -13)) : [];
+    if (ext.length) L.push(`Workouts other apps recorded, last 14 days (already counted in active minutes; repeats of what they logged here are left out): ${ext.map(x => `${x.date} ${x.custom || x.title || (PK.HC_TYPES[x.typeName] || {}).en || 'workout'} ${x.mins} min (${PK.appName(x.app)})`).join('; ')}.`);
     if (D.active) L.push(`A session is in progress right now: ${en(D.active.name)}.`);
 
     const links = `Lesson ids: ${LS.list.map(l => `${l.id} ${en(l.title)}`).join('; ')}.\nExercise ids: ${EX.list.map(e => `${e.id} (${en(e.name)})`).join('; ')}.`;
     const hist = ((D.coach && D.coach.msgs) || []).filter(m => m.role === 'user' || m.role === 'coach').slice(-8)
-      .map(m => `${m.role === 'user' ? 'User' : 'Coach'}: ${String(m.text).replace(/<workout>[\s\S]*?<\/workout>/gi, '[workout card]').replace(/<focus>[\s\S]*?<\/focus>/gi, '[focus block card]').slice(0, 1200)}`).join('\n');
+      .map(m => `${m.role === 'user' ? 'User' : 'Coach'}: ${plainMsg(m.text).slice(0, 1200)}`).join('\n');
+    const memory = memoryLines(D.coach);
     const wants = !!B && wantsWorkout(o.question);
     let blockRules = '';
     if (B) {
@@ -194,7 +195,7 @@ Data:
 ${L.join('\n')}
 
 ${links}${catalogue}
-${hist ? `\nConversation so far (oldest first):\n${hist}\n` : ''}
+${memory ? `\nWhat you remember from earlier chats (your own summaries, oldest first). Use them when they help and refer back naturally; don't recite them, and where they disagree with the data above, the data wins:\n${memory}\n` : ''}${hist ? `\nConversation so far (oldest first):\n${hist}\n` : ''}
 New question: ${String(o.question || '').slice(0, 1500)}`;
     return { prompt, lang };
   }
@@ -221,5 +222,50 @@ New question: ${String(o.question || '').slice(0, 1500)}`;
     return { html: out.join(''), links };
   }
 
-  return { buildPrompt, renderAnswer, detectLang, extractBlocks, wantsWorkout };
+  /* ---------- memory: short summaries of earlier chats ---------- */
+  const MEM_MAX = 40, MEM_PROMPT_CHARS = 1800, QUIET = 2 * 3600000;
+  const plainMsg = t => String(t || '').replace(/<workout>[\s\S]*?<\/workout>/gi, '[workout card]').replace(/<focus>[\s\S]*?<\/focus>/gi, '[focus block card]');
+  /* Messages not summarised yet: a cleared chat waiting for its summary (backlog), then the chat after the last summary. */
+  function pendingMsgs(coach) {
+    const at = (coach && coach.sumAt) || 0;
+    return ((coach && coach.backlog) || []).concat(((coach && coach.msgs) || []).filter(m => (m.role === 'user' || m.role === 'coach') && m.at > at));
+  }
+  /* Summarise once there's a question and an answer: right away for a new chat (force), otherwise after 8 messages
+     or once the chat has been quiet for 2 hours. */
+  function shouldSummarize(coach, now, force) {
+    if (!coach || coach.memOn === false) return false;
+    const p = pendingMsgs(coach);
+    if (!p.some(m => m.role === 'user') || !p.some(m => m.role === 'coach')) return false;
+    return !!force || p.length >= 8 || now - p[p.length - 1].at >= QUIET;
+  }
+  function summaryPrompt(msgs, mem, lang) {
+    const chat = msgs.slice(-30).map(m => `${m.role === 'user' ? 'Person' : 'Coach'}: ${plainMsg(m.text).replace(/\[\[(lesson|ex):[^\]]+\]\]/g, '').slice(0, 700)}`).join('\n');
+    const prev = (mem || []).slice(-3).map(x => x.text).join('\n');
+    return `You keep the memory of the training coach inside the PoKreni app. Summarise the chat below so the coach can pick up where it left off in a later chat.
+Write 1-4 bullet points, each starting with "- ", in ${lang === 'hr' ? 'Croatian' : 'English'}, under 70 words in total. Nothing else.
+Keep only what will still matter later: goals and plans, decisions and what they agreed to try, pain or injuries they mentioned, preferences, and the key advice given (with numbers such as weights, reps or minutes). Skip greetings and small talk. Don't add anything that wasn't said, and don't repeat what is already remembered.
+${prev ? `Already remembered:\n${prev}\n` : ''}
+Chat (oldest first):
+${chat}`;
+  }
+  /* The "- " lines of the answer (at most 4), or its text as one line if the model wrote prose. */
+  function cleanSummary(text) {
+    const s = String(text || '').replace(/<[^>]+>/g, '').replace(/\*\*/g, '').trim();
+    let lines = s.split(/\n+/).map(l => l.trim()).filter(l => /^[-•*]\s+/.test(l)).map(l => '- ' + l.replace(/^[-•*]\s+/, '').trim()).filter(l => l.length > 3);
+    if (!lines.length && s) lines = ['- ' + s.replace(/\s+/g, ' ')];
+    return lines.slice(0, 4).map(l => l.slice(0, 240)).join('\n').slice(0, 800);
+  }
+  /* The newest summaries that fit the prompt, oldest first. */
+  function memoryLines(coach) {
+    if (!coach || coach.memOn === false) return '';
+    const out = []; let n = 0;
+    for (const m of (coach.mem || []).slice().reverse()) {
+      const line = `${m.from === m.to ? m.from : `${m.from} to ${m.to}`}:\n${m.text}`;
+      if (n + line.length > MEM_PROMPT_CHARS) break;
+      out.unshift(line); n += line.length;
+    }
+    return out.join('\n');
+  }
+
+  return { buildPrompt, renderAnswer, detectLang, extractBlocks, wantsWorkout, MEM_MAX, pendingMsgs, shouldSummarize, summaryPrompt, cleanSummary, memoryLines };
 });

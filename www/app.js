@@ -96,8 +96,8 @@ const S = {
   profile: DEFAULT_PROFILE(), readiness: null, baselines: [], lessons: {}, quiz: {},
   program: { id: 'foundations', next: 0 }, lifts: {}, sessions: [], cardio: [], active: null,
   settings: { health: { on: false }, remind: { on: false, time: '16:30' } },
-  hc: { weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, extList: [], rhr: null, sources: {}, syncedAt: 0, granted: [] },
-  tanjur: null, coach: { msgs: [] }, aiUsage: null,
+  hc: { weight: null, sleep: {}, steps: {}, protein: {}, extAll: null, rhr: null, sources: {}, syncedAt: 0, granted: [] },
+  tanjur: null, coach: { msgs: [], mem: [], memOn: true, sumAt: 0, backlog: [] }, aiUsage: null,
   injuries: [], focus: null, workouts: [], planned: null, extras: {}, todayExtra: null,
   savedAt: 0
 };
@@ -117,10 +117,13 @@ function applyData(d) {
   S.cardio = Array.isArray(d.cardio) ? d.cardio.filter(c => c && c.id && PK.isKey(c.date)) : [];
   S.active = d.active && d.active.items ? d.active : null;
   S.settings = Object.assign({ health: { on: false }, remind: { on: false, time: '16:30' } }, d.settings || {});
-  S.hc = Object.assign({ weight: null, sleep: {}, steps: {}, protein: {}, ext: {}, extList: [], rhr: null, sources: {}, syncedAt: 0, granted: [] }, d.hc || {});
+  S.hc = Object.assign({ weight: null, sleep: {}, steps: {}, protein: {}, extAll: null, rhr: null, sources: {}, syncedAt: 0, granted: [] }, d.hc || {});
   S.tanjur = d.tanjur && d.tanjur.app === 'tanjur' ? d.tanjur : null;
   if (S.tanjur) delete S.tanjur.ai;
-  S.coach = d.coach && Array.isArray(d.coach.msgs) ? { msgs: d.coach.msgs.slice(-40) } : { msgs: [] };
+  const dc = d.coach || {};
+  /* mem: summaries of earlier chats the coach remembers; sumAt: newest message already summarised; backlog: a cleared chat still to summarise. */
+  S.coach = { msgs: Array.isArray(dc.msgs) ? dc.msgs.slice(-40) : [], mem: Array.isArray(dc.mem) ? dc.mem.filter(m => m && m.text).slice(-COACH.MEM_MAX) : [],
+    memOn: dc.memOn !== false, sumAt: +dc.sumAt || 0, backlog: Array.isArray(dc.backlog) ? dc.backlog.slice(-30) : [] };
   S.aiUsage = d.aiUsage && d.aiUsage.month ? d.aiUsage : null;
   S.injuries = Array.isArray(d.injuries) ? d.injuries.filter(x => x && BODY.byId[x.area] && (x.level === 'ease' || x.level === 'avoid')) : [];
   S.focus = d.focus && BODY.byId[d.focus.muscle] && EX.byId[d.focus.ex] ? d.focus : null;
@@ -196,7 +199,20 @@ function tanjurToday() {
   const day = (T.days && T.days[k]) || null;
   return { day, meals: T.today === k ? (T.meals || []) : [], targets: T.targets || null, at: T.at };
 }
-const extMinutes = () => S.hc.ext || {};
+/* Outside workouts as shown and counted (duplicates of what you logged here, and hidden ones, don't count).
+   Data synced before 1.7 only has per-day minutes (hc.ext) until the next sync. */
+const extView = () => (S.hc.extAll ? PK.extView(S, EX) : []);
+const extMinutes = () => (S.hc.extAll ? PK.extMinutes(extView()) : (S.hc.ext || {}));
+const extName = x => x.custom || x.title || (PK.HC_TYPES[x.typeName] ? tx(PK.HC_TYPES[x.typeName]) : t('workoutWord'));
+const extLabel = x => (x.custom ? x.custom : `${extName(x)} · ${PK.appName(x.app)}`);
+const extIcon = x => (PK.ZEPP.includes(x.app) ? 'watch' : 'heart');
+/* What an outside workout was matched with, in words ("your Treadmill walk"). */
+function dupText(d) {
+  if (!d) return '';
+  if (d.kind === 'cardio') { const c = S.cardio.find(x => x.id === d.id); return t('dupCardio', { name: c ? exName(c.type) : exName(d.type) }); }
+  if (d.kind === 'session') { const ss = S.sessions.find(x => x.id === d.id); return t('dupSession', { name: ss ? tx(ss.name) : tx(d.name || {}) }); }
+  return t('dupApp', { app: PK.appName(d.app) });
+}
 function lessonDone(id) {
   const l = LS.byId[id]; if (!l) return false;
   const c = l.check.type;
@@ -258,6 +274,23 @@ function addToPlan(id, how) {
   }
   persist(); closeAllSheets(); scheduleRender();
   toast(t(how === 'always' && !tpl.custom ? 'addedAlwaysToast' : 'addedToast', { name: tx(ex.name), tpl: tx(tpl.name) }));
+}
+/* Is this exercise one you asked to have in every session of the A/B day you're doing now? */
+function keptExtra(A, id) { return !!A && !A.custom && (S.extras[program().id + ':' + A.template] || []).some(x => x.ex === id); }
+/* Takes an exercise out of the session you're doing (any one: added or from the plan). always also stops adding it to this A/B day.
+   Undo puts both back. */
+function removeLive(i, always) {
+  const A = S.active, it = A && A.items[i]; if (!it) return;
+  const k = program().id + ':' + A.template, extrasBefore = S.extras[k] ? S.extras[k].slice() : null;
+  A.items.splice(i, 1);
+  if (always && extrasBefore) S.extras[k] = extrasBefore.filter(x => x.ex !== it.ex);
+  persist(); closeAllSheets(); scheduleRender();
+  toast(t(always ? 'removedAlwaysToast' : 'removedLiveToast', { name: exName(it.ex), tpl: tx(A.name) }), { label: t('undo'), fn: () => {
+    if (S.active !== A) return;
+    A.items.splice(Math.min(i, A.items.length), 0, it);
+    if (always && extrasBefore) S.extras[k] = extrasBefore;
+    persist(); scheduleRender();
+  } });
 }
 function removeAdded(id, how) {
   if (how === 'always') { const k = extraKey(todayTemplate()); if (S.extras[k]) S.extras[k] = S.extras[k].filter(x => x.ex !== id); }
@@ -363,6 +396,7 @@ function safely(fn, sel) {
 function setTab(tab) {
   if (tab === 'train' && !S.active) tab = 'today';
   U.tab = tab; window.scrollTo(0, 0); scheduleRender();
+  if (tab === 'coach') summarizeChat(false);
 }
 function paintChrome() {
   $('#langBtn').textContent = LANG === 'hr' ? 'EN' : 'HR';
@@ -439,9 +473,9 @@ function weekCard(k) {
   S.sessions.filter(s => s.date >= ws).forEach(s => items.push({ date: s.date, t: s.start, label: tx(s.name), meta: `${PK.sessionMinutes(s)} min`, ic: 'go', act: `data-act="hist" data-id="${s.id}"` }));
   S.cardio.filter(c => c.date >= ws).forEach(c => items.push({ date: c.date, t: c.start || c.date, label: exName(c.type), meta: `${c.minutes} min`, ic: 'walk', act: `data-act="cardio" data-id="${c.id}"` }));
   /* Workouts other apps put in Health Connect (the watch through Zepp, Samsung Health…), one row each when we know them. */
-  const named = (S.hc.extList || []).filter(x => x.date >= ws), namedDays = new Set(named.map(x => x.date));
-  named.forEach(x => items.push({ date: x.date, t: x.start, label: x.title || t('workoutFrom', { app: PK.appName(x.app) }), meta: `${x.mins} min`, ic: PK.ZEPP.includes(x.app) ? 'watch' : 'heart', act: '' }));
-  for (const d in extMinutes()) if (d >= ws && !namedDays.has(d)) items.push({ date: d, t: d, label: t('fromWatch'), meta: `${extMinutes()[d]} min`, ic: 'heart', act: '' });
+  /* Repeats of what you logged here and ones you hid are left out; tap one to rename or hide it. */
+  if (S.hc.extAll) extView().filter(x => x.counted && x.date >= ws).forEach(x => items.push({ date: x.date, t: x.start, label: extLabel(x), meta: `${x.mins} min`, ic: extIcon(x), act: `data-act="ext" data-id="${esc(x.id)}"` }));
+  else for (const d in extMinutes()) if (d >= ws) items.push({ date: d, t: d, label: t('fromWatch'), meta: `${extMinutes()[d]} min`, ic: 'heart', act: '' });
   items.sort((a, b) => (a.t < b.t ? 1 : -1));
   const pct = clamp(w.cardioMin / 150 * 100, 0, 100);
   return `<section class="card week"><div class="card-head"><h2>${esc(t('thisWeek'))}</h2><button class="btn small ghost" data-act="cardio">${icon('plus')}${esc(t('logCardio'))}</button></div>
@@ -555,7 +589,7 @@ function trainItem(it, i) {
     ${ex.note ? `<p class="banner info">${icon('info')}${esc(tx(ex.note))}</p>` : ''}
     ${firstTime ? `<p class="hint">${esc(t('firstLoadHint'))}</p>` : ''}
     <div class="sets">${setHeader(ex, item)}${rows}</div>
-    <div class="ti-tools"><button class="btn small ghost" data-act="ex" data-id="${ex.id}">${icon('info')}${esc(t('howTo'))}</button>${swap}${!item.mins ? `<button class="btn small ghost" data-act="add-set" data-i="${i}">${icon('plus')}${esc(t('addSet'))}</button>${it.sets.length > 1 ? `<button class="btn small ghost" data-act="del-set" data-i="${i}">${icon('minus')}${esc(t('removeSet'))}</button>` : ''}` : ''}</div>
+    <div class="ti-tools"><button class="btn small ghost" data-act="ex" data-id="${ex.id}">${icon('info')}${esc(t('howTo'))}</button>${swap}${!item.mins ? `<button class="btn small ghost" data-act="add-set" data-i="${i}">${icon('plus')}${esc(t('addSet'))}</button>${it.sets.length > 1 ? `<button class="btn small ghost" data-act="del-set" data-i="${i}">${icon('minus')}${esc(t('removeSet'))}</button>` : ''}` : ''}<button class="btn small ghost danger" data-act="ti-remove" data-i="${i}">${icon('x')}${esc(t('removeEx'))}</button></div>
     ${pain}</section>`;
 }
 function setHeader(ex, item) {
@@ -897,7 +931,7 @@ function renderProfile() {
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.6 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.7 · ${esc(t('aboutLine'))}</p>`;
 }
 function weightField() {
   const w = weightSource();
@@ -914,6 +948,13 @@ function watchStats() {
   if (hr) cells.push(`<div><div class="stat-num">${hr.bpm}<small> bpm</small></div><div class="stat-lab">${esc(t(hr.low ? 'hrLowest' : 'hrResting'))}</div></div>`);
   return cells.length ? `<div class="watch-stats">${cells.join('')}</div>` : '';
 }
+/* Outside workouts of the last 14 days and what PoKreni does with each: counted, already logged here, or hidden. */
+function extListCard() {
+  const list = extView().filter(x => x.date >= addDays(today(), -13)); if (!list.length) return '';
+  const st = x => x.counted ? chip('good', t('extCounted')) : x.hidden ? chip('info', t('extHiddenChip')) : chip('info', t('extDupChip'));
+  return `<div class="ext-list"><h3>${esc(t('extListTitle'))}</h3><ul class="act-list">${list.slice(0, 10).map(x => `<li><button class="act-row" data-act="ext" data-id="${esc(x.id)}">${icon(extIcon(x))}<span class="act-main">${esc(extLabel(x))}<small>${esc(`${shortDate(x.date)} · ${x.mins} min`)}</small></span>${st(x)}</button></li>`).join('')}</ul>
+    <p class="muted small">${esc(t('extListNote'))}</p></div>`;
+}
 function watchCard() {
   if (!Native.Bridge && !PK.watchStatus(S.hc)) return '';
   const ws = PK.watchStatus(S.hc), hs = S.settings.health || {};
@@ -922,7 +963,7 @@ function watchCard() {
   const missing = hs.on && Native.Bridge ? HC_PERMS.filter(p => /READ_(STEPS|HEART_RATE|RESTING_HEART_RATE|SLEEP|EXERCISE)$/.test(p) && !(S.hc.granted || []).includes(p)) : [];
   const btns = `${missing.length ? `<p class="banner warn">${icon('info')}${esc(t('watchAllowMore'))}</p><button class="btn primary block" data-act="hc-connect" style="margin-bottom:8px">${esc(t('hcAskAgain'))}</button>` : ''}
     <div class="row2"><button class="btn" data-act="zepp">${esc(t('openZepp'))}</button>${hs.on ? `<button class="btn ghost" data-act="hc-sync" ${U.hcBusy ? 'disabled' : ''}>${icon('sync')}${esc(U.hcBusy ? t('syncing') : t('syncNow'))}</button>` : `<button class="btn primary" data-act="hc-connect">${esc(t('hcConnect'))}</button>`}</div>`;
-  const notif = `<details class="watch-tip"><summary>${esc(t('watchNotifTitle'))}</summary><p class="small">${esc(t('watchNotif'))}</p></details>`;
+  const notif = `<details class="watch-tip"><summary>${esc(t('watchNotifTitle'))}</summary><p class="small">${esc(t('watchNotif'))}</p></details>${extListCard()}`;
   if (ws) return `<section class="card watch">${head}<p class="muted small">${esc(t('watchSeen', { app: ws.app, at: atText(ws.last) }))}</p>${watchStats()}
     <p class="muted small">${esc(t('watchCounts'))}</p>${btns}${notif}</section>`;
   return `<section class="card watch">${head}<p class="small">${esc(t('watchIntro'))}</p>
@@ -1100,6 +1141,17 @@ const SHEETS = {
       ${lift && (lift.kg != null || lift.reps || lift.secs) ? `<h3>${esc(t('nextTime'))}</h3><p>${lift.kg != null ? n1(lift.kg) + ' kg' : ''}${lift.reps ? ' × ' + lift.reps : ''}${lift.secs ? ' · ' + lift.secs + ' s' : ''}</p>` : ''}
       ${hist.length ? `<h3>${esc(t('recent'))}</h3><ul class="mini-hist">${hist.map(h => `<li><span>${esc(shortDate(h.date))}</span><span>${h.kg ? n1(h.kg) + ' kg × ' : ''}${h.reps || (h.secs ? h.secs + ' s' : '')}</span></li>`).join('')}</ul>` : ''}` };
   },
+  /* Removing an exercise from the session you're doing: says what goes with it (logged sets) and offers to stop adding a kept one. */
+  tirm({ i }) {
+    const A = S.active, it = A && A.items[i]; if (!it) return {};
+    const done = it.sets.filter(x => x.done).length, kept = keptExtra(A, it.ex);
+    return { title: t('removeExTitle', { name: exName(it.ex) }), sub: tx(A.name), body: `
+      ${done ? `<p class="banner warn">${icon('alert')}${esc(t('removeExDone', { n: done }))}</p>` : ''}
+      <p>${esc(t(kept ? 'removeExKept' : 'removeExBody', { tpl: tx(A.name) }))}</p>
+      <button class="btn danger-solid block" data-act="ti-rm-do" data-i="${i}" data-v="today">${esc(t('removeExToday'))}</button>
+      ${kept ? `<button class="btn ghost block danger" data-act="ti-rm-do" data-i="${i}" data-v="always">${esc(t('removeExAlways', { tpl: tx(A.name) }))}</button>` : ''}
+      <button class="btn ghost block" data-act="sheet-close">${esc(t('cancel'))}</button>` };
+  },
   /* A warm-up move explained: drawing, why it helps, how to do it, and the full exercise guide (videos, your clip) one tap away. */
   warm({ id }) {
     const w = PR.WARMUP.find(x => x.id === id); if (!w) return {};
@@ -1157,7 +1209,29 @@ const SHEETS = {
       <div class="row2"><label class="field"><span>${esc(t('date'))}</span><input type="date" id="c-date" max="${today()}" value="${esc(draft.date)}"></label><label class="field"><span>${esc(t('time'))}</span><input type="time" id="c-time" value="${esc(draft.time || '18:00')}"></label></div>
       <p class="muted small" id="c-kcal">${esc(t('kcalEst', { kcal: n0(kcal) }))}</p>
       <button class="btn primary block" data-act="cardio-save">${esc(t('save'))}</button>
-      ${c ? `<button class="btn ghost block danger" data-act="cardio-del" data-id="${c.id}">${icon('trash')}${esc(t('delete'))}</button>` : ''}` };
+      ${c ? `<button class="btn ghost block danger" data-act="cardio-del" data-id="${c.id}">${icon('trash')}${esc(t('delete'))}</button>` : ''}
+      ${c ? extView().filter(x => x.dupOf && x.dupOf.kind === 'cardio' && x.dupOf.id === c.id && !x.counted).map(x => `<button class="act-row merged" data-act="ext" data-id="${esc(x.id)}">${icon(extIcon(x))}<span class="act-main">${esc(t('alsoRecorded', { app: PK.appName(x.app) }))}<small>${esc(`${extName(x)} · ${clock(new Date(x.start))}–${clock(new Date(x.end))} · ${x.mins} min · ${t('countedOnce')}`)}</small></span>${icon('right', 'chev')}</button>`).join('') : ''}` };
+  },
+  /* A workout another app wrote (e.g. a walk the watch recorded): rename it, hide it, or count it after all.
+     It stays in Zepp and Health Connect; only PoKreni's view changes. */
+  ext({ id }) {
+    const x = extView().find(v => v.id === id);
+    if (!x) return { title: t('workoutWord'), body: `<p class="muted">${esc(t('extGone'))}</p>` };
+    const btn = (v, label, cls) => `<button class="btn ${cls || 'ghost'}" data-act="ext-set" data-id="${esc(x.id)}" data-v="${v}">${esc(label)}</button>`;
+    const state = x.hidden ? `<p class="banner info">${icon('info')}${esc(t('extHiddenNote'))}</p>`
+      : x.forced && x.dupOf ? `<p class="banner warn">${icon('info')}${esc(t('extForcedNote', { what: dupText(x.dupOf) }))}</p>`
+        : x.dupOf ? `<p class="banner info">${icon('info')}${esc(t('extDupNote', { what: dupText(x.dupOf) }))}</p>`
+          : `<p class="banner good">${icon('check')}${esc(t('extCountedNote'))}</p>`;
+    const actions = x.hidden ? btn('auto', t('extShow'))
+      : x.forced ? btn('auto', t('extCountOnce'))
+        : x.dupOf ? btn('count', t('extCountAnyway')) + btn('hide', t('extHide'))
+          : btn('hide', t('extHide'));
+    const ph = x.title || (PK.HC_TYPES[x.typeName] ? tx(PK.HC_TYPES[x.typeName]) : t('workoutWord'));
+    return { title: extName(x), sub: `${PK.appName(x.app)} · ${shortDate(x.date)}, ${clock(new Date(x.start))}–${clock(new Date(x.end))} · ${x.mins} min`, body: `${state}
+      <div class="row2 ext-actions">${actions}</div>
+      <label class="field"><span>${esc(t('extRename'))}</span><input type="text" id="ext-name" maxlength="40" value="${esc(x.custom)}" placeholder="${esc(ph)}" autocomplete="off"></label>
+      <button class="btn primary block" data-act="ext-name" data-id="${esc(x.id)}">${esc(t('save'))}</button>
+      <p class="muted small">${esc(t('extNote', { app: PK.appName(x.app) }))}</p>` };
   },
   lesson({ id }) {
     const l = LS.byId[id]; if (!l) return {};
@@ -1378,16 +1452,18 @@ async function syncHealth(manual) {
   if (has('READ_EXERCISE')) {
     try {
       const r = await B.readSessions({ start: new Date(parseKey(addDays(weekStart(k), -63))).toISOString(), end: new Date().toISOString() });
-      const ext = {}, list = [];
+      /* Every workout another app wrote (the watch through Zepp, Samsung Health…). Which ones count is decided when shown
+         (PK.extView): repeats of what you logged here, and ones you hid, don't. */
+      const all = [];
       (r.sessions || []).forEach(s => {
-        if (s.app === PKG_SELF) return;
-        const d = dkey(new Date(s.start)), mins = Math.round((Date.parse(s.end) - Date.parse(s.start)) / 60000);
-        ext[d] = (ext[d] || 0) + mins;
-        if (d >= addDays(k, -13)) list.push({ date: d, start: s.start, mins, app: s.app, title: s.title || '' });
+        if (s.app === PKG_SELF || !s.id) return;
+        const mins = Math.round((Date.parse(s.end) - Date.parse(s.start)) / 60000); if (!(mins > 0)) return;
+        all.push({ id: s.id, date: dkey(new Date(s.start)), start: isoOf(s.start), end: isoOf(s.end), mins, app: s.app, type: s.type, typeName: s.typeName || '', title: s.title || '' });
         const key = s.app + '|workout', at = isoOf(s.end); if (at > (S.hc.sources[key] || '')) S.hc.sources[key] = at;
       });
-      S.hc.ext = ext;
-      S.hc.extList = list.sort((a, b) => (a.start < b.start ? 1 : -1)).slice(0, 10);
+      S.hc.extAll = all.sort((a, b) => (a.start < b.start ? 1 : -1));
+      if (S.settings.hcExt) { const ids = new Set(all.map(x => x.id)); for (const id in S.settings.hcExt) if (!ids.has(id)) delete S.settings.hcExt[id]; }
+      delete S.hc.ext; delete S.hc.extList;
     } catch (e) { /* skip */ }
   }
   S.hc.syncedAt = Date.now(); U.hcBusy = false;
@@ -1449,6 +1525,7 @@ function renderCoach() {
     U.coachLang = LANG;
     el.innerHTML = `<header class="view-head"><div><div class="eyebrow">${esc(t('coachEyebrow'))}</div><h1>${esc(t('coachTitle'))}</h1></div><span id="coachSrc"></span></header>
       <div id="coachSetup"></div>
+      <div id="coachMem"></div>
       <div class="chat" id="coachMsgs" aria-live="polite"></div>
       <div class="composer">
         <textarea id="coachInput" rows="2" maxlength="1500" placeholder="${esc(t('coachPlaceholder'))}">${esc(U.coachDraft)}</textarea>
@@ -1459,6 +1536,7 @@ function renderCoach() {
   $('#coachSrc').innerHTML = chipS;
   $('#coachSetup').innerHTML = AIC.available() ? '' : `<section class="card callout warn"><h2>${esc(t('coachSetupTitle'))}</h2><p class="small">${esc(t(S.tanjur ? 'coachSetupBody' : 'coachSetupNoTanjur'))}</p>
     <div class="row2"><button class="btn" data-act="tanjur" data-path="ai">${esc(t('openTanjur'))}</button><button class="btn ghost" data-act="tj-refresh">${icon('sync')}${esc(t('refresh'))}</button></div></section>`;
+  $('#coachMem').innerHTML = coachMemCard();
   const msgs = S.coach.msgs;
   let html = '';
   if (!msgs.length) html += `<div class="coach-intro"><p>${esc(t('coachIntro'))}</p><div class="chips wrap">${COACH_CHIPS.map(k => `<button class="chip-btn" data-act="coach-ask" data-q="${esc(t(k))}">${esc(t(k))}</button>`).join('')}</div></div>`;
@@ -1475,7 +1553,7 @@ function renderCoach() {
     } else html += `<div class="msg err"><div class="bubble">${icon('alert')}${esc(m.text)}</div></div>`;
   });
   if (U.coachBusy) html += `<div class="msg coach"><div class="bubble thinking"><span class="dots3"><i></i><i></i><i></i></span>${esc(t('thinking'))}<button class="btn small ghost" data-act="coach-stop">${esc(t('stop'))}</button></div></div>`;
-  if (msgs.length && !U.coachBusy) html += `<div class="chat-tools"><button class="btn small ghost" data-act="coach-clear">${icon('trash')}${esc(t('clearChat'))}</button></div>`;
+  if (msgs.length && !U.coachBusy) html += `<div class="chat-tools"><button class="btn small ghost" data-act="coach-clear">${icon('plus')}${esc(t('newChat'))}</button></div>`;
   $('#coachMsgs').innerHTML = html;
   const send = $('#coachSend'); if (send) send.disabled = !!U.coachBusy;
 }
@@ -1517,6 +1595,45 @@ function coachCardAct(act, at, ci) {
   else if (act === 'fb-start') { if (startFocus(c.muscle, c.weeks)) c.started = true; }
   persist(); renderCoach();
 }
+/* ---------- coach memory ---------- */
+/* Saves a short summary of the chat (or a cleared one waiting in backlog) so later chats can build on it. Runs in the
+   background: after 8 new messages, when a chat has been quiet for 2 hours, or right away for a new chat (force). */
+async function summarizeChat(force) {
+  const C = S.coach;
+  if (U.sumBusy || U.coachBusy || !AIC.available() || !COACH.shouldSummarize(C, Date.now(), force)) return false;
+  const msgs = COACH.pendingMsgs(C), upto = msgs[msgs.length - 1].at;
+  U.sumBusy = true; if (U.tab === 'coach') renderCoach();
+  let ok = false;
+  try {
+    const lang = COACH.detectLang(msgs.filter(m => m.role === 'user').map(m => m.text).join(' '), LANG);
+    const r = await AIC.text(COACH.summaryPrompt(msgs, C.mem, lang), { maxTokens: 300, temperature: 0.2 });
+    const text = COACH.cleanSummary(r.text);
+    if (text) C.mem = C.mem.concat([{ id: uid(), at: Date.now(), from: dkey(new Date(msgs[0].at)), to: dkey(new Date(upto)), text }]).slice(-COACH.MEM_MAX);
+    C.backlog = []; C.sumAt = Math.max(C.sumAt || 0, upto); ok = !!text;
+  } catch (e) { /* tried again later: when the chat is quiet or the next new chat */ }
+  U.sumBusy = false; persist(); if (U.tab === 'coach') renderCoach();
+  return ok;
+}
+function newChat() {
+  const C = S.coach;
+  if (C.memOn) C.backlog = COACH.pendingMsgs(C).slice(-30);
+  C.msgs = []; C.sumAt = Date.now();
+  persist(); closeAllSheets(); renderCoach();
+  if (C.memOn && C.backlog.length) summarizeChat(true).then(ok => { if (ok) toast(t('memSaved')); });
+}
+/* What the coach remembers: one card, collapsed, above the chat. */
+function coachMemCard() {
+  const C = S.coach, mem = C.mem.slice().reverse();
+  const range = m => (m.from === m.to ? shortDate(m.from) : `${shortDate(m.from)} – ${shortDate(m.to)}`);
+  return `<details class="card coach-mem" ${U.memOpen ? 'open' : ''} id="coachMemBox"><summary><span class="ic-h">${icon('book')}${esc(t('memTitle'))}</span>
+      <span class="muted small">${U.sumBusy ? esc(t('memSaving')) : C.memOn ? esc(t('memCount', { n: mem.length })) : esc(t('off'))}</span></summary>
+    <p class="muted small">${esc(t('memAbout'))}</p>
+    <label class="switch"><input type="checkbox" id="memOn" ${C.memOn ? 'checked' : ''}><span>${esc(t('memOn'))}</span></label>
+    ${mem.length ? `<ul class="mem-list">${mem.map(m => `<li><div class="mem-main"><div class="mem-date">${esc(range(m))}</div><div class="mem-text">${m.text.split('\n').map(l => `<p>${esc(l.replace(/^- /, ''))}</p>`).join('')}</div></div>
+      <button class="row-x" data-act="mem-del" data-id="${esc(m.id)}" aria-label="${esc(t('memDel'))}">${icon('x')}</button></li>`).join('')}</ul>
+      <button class="btn small ghost danger" data-act="mem-forget">${icon('trash')}${esc(t('memForget'))}</button>` : `<p class="small">${esc(t('memEmpty'))}</p>`}
+  </details>`;
+}
 function scrollCoachEnd() { requestAnimationFrame(() => { const c = $('#coachMsgs'); if (c && c.lastElementChild) c.lastElementChild.scrollIntoView({ block: 'end', behavior: 'smooth' }); }); }
 async function askCoach(q) {
   q = String(q || '').trim(); if (!q || U.coachBusy) return;
@@ -1542,6 +1659,7 @@ async function askCoach(q) {
   }
   U.coachBusy = null; S.coach.msgs = S.coach.msgs.slice(-40);
   persist(); if (U.tab === 'coach') { renderCoach(); scrollCoachEnd(); }
+  summarizeChat(false);
 }
 
 /* ---------- Tanjur ---------- */
@@ -1559,7 +1677,7 @@ async function readTanjur(force) {
         /* AI keys are kept in memory only: never in PoKreni's data file or backups. */
         U.ai = d.ai && typeof d.ai === 'object' ? d.ai : null; delete d.ai;
         U.tjUsage = d.aiUsage || null;
-        S.tanjur = d; U.tjState = 'ok'; U.tanjur = true; persist(); scheduleRender(); return;
+        S.tanjur = d; U.tjState = 'ok'; U.tanjur = true; persist(); scheduleRender(); summarizeChat(false); return;
       }
     }
     U.tjState = (r && r.reason) || 'missing';
@@ -1570,6 +1688,15 @@ async function openTanjur(path) {
   const url = 'tanjur://' + (path || 'today');
   if (!Native.Bridge) { toast(t('tanjurPhone')); return; }
   try { const r = await Native.Bridge.openUrl({ url }); if (!r.opened) { U.tanjur = false; toast(t('tanjurMissing')); } else U.tanjur = true; } catch (e) { toast(t('tanjurMissing')); }
+}
+/* Per outside workout: { hide: true } hidden, { hide: false } counted even if it looks like a repeat, { name } your name for it. */
+function setExt(id, patch) {
+  const all = S.settings.hcExt || (S.settings.hcExt = {});
+  const p = Object.assign({}, all[id], patch);
+  if (p.hide === undefined) delete p.hide;
+  if (!p.name) delete p.name;
+  if (Object.keys(p).length) all[id] = p; else delete all[id];
+  persist(); scheduleRender(); if (U.sheets.length) renderSheet();
 }
 async function openZepp() {
   if (!Native.Bridge) { toast(t('hcWeb')); return; }
@@ -1626,8 +1753,11 @@ function handleAct(act, b) {
     case 'coach-ask': askCoach(b.dataset.q); break;
     case 'coach-send': { const i = $('#coachInput'); askCoach(i ? i.value : ''); break; }
     case 'coach-stop': if (U.coachBusy) U.coachBusy.ctl.abort(); break;
-    case 'coach-clear': openSheet('confirm', { msg: t('clearChatConfirm'), yes: t('clearChat'), act: 'coach-clear-yes' }); break;
-    case 'coach-clear-yes': S.coach.msgs = []; persist(); closeAllSheets(); renderCoach(); break;
+    case 'coach-clear': openSheet('confirm', { msg: t(S.coach.memOn ? 'newChatConfirm' : 'clearChatConfirm'), yes: t('newChat'), act: 'coach-clear-yes' }); break;
+    case 'coach-clear-yes': newChat(); break;
+    case 'mem-del': S.coach.mem = S.coach.mem.filter(m => m.id !== id); persist(); renderCoach(); break;
+    case 'mem-forget': openSheet('confirm', { msg: t('memForgetConfirm'), yes: t('memForget'), act: 'mem-forget-yes' }); break;
+    case 'mem-forget-yes': S.coach.mem = []; S.coach.backlog = []; S.coach.sumAt = Date.now(); persist(); closeAllSheets(); renderCoach(); toast(t('memForgotten')); break;
     case 'reload': location.reload(); break;
     case 'go': if (S.active) setTab('train'); else startSession(); break;
     case 'bm-range': U.bmDays = +b.dataset.v === 28 ? 28 : 7; scheduleRender(); break;
@@ -1682,6 +1812,9 @@ function handleAct(act, b) {
     case 'begin': { const short = $('#ciSleep [data-v="short"]').getAttribute('aria-pressed') === 'true', pain = $('#ciPain [data-v="yes"]').getAttribute('aria-pressed') === 'true'; beginSession(short || pain, pain); break; }
     case 'warm-info': openSheet('warm', { id }); break;
     case 'zepp': openZepp(); break;
+    case 'ext': openSheet('ext', { id }); break;
+    case 'ext-set': setExt(id, { hide: b.dataset.v === 'hide' ? true : b.dataset.v === 'count' ? false : undefined }); break;
+    case 'ext-name': { const i = $('#ext-name'); setExt(id, { name: i ? i.value.trim().slice(0, 40) : '' }); toast(t('savedChip')); break; }
     case 'watch-open': setTab('profile'); setTimeout(() => { const c = $('#view-profile .card.watch'); if (c) c.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 120); break;
     case 'warm-toggle': S.active.warmOpen = !S.active.warmOpen; persist(); renderTrain(); break;
     case 'ti-toggle': { const it = S.active.items[+b.dataset.i]; it.open = !it.open; persist(); renderTrain(); break; }
@@ -1695,6 +1828,9 @@ function handleAct(act, b) {
     }
     case 'add-set': { const it = S.active.items[+b.dataset.i], last = it.sets[it.sets.length - 1] || {}; it.sets.push({ kg: last.kg ?? '', reps: last.reps ?? '', secs: last.secs ?? '', rir: '', done: false }); persist(); renderTrain(); break; }
     case 'swap': openSheet('swap', { i: +b.dataset.i }); break;
+    case 'ti-remove': { const i = +b.dataset.i, it = S.active && S.active.items[i]; if (!it) break;
+      if (it.sets.some(x => x.done) || keptExtra(S.active, it.ex)) openSheet('tirm', { i }); else removeLive(i, false); break; }
+    case 'ti-rm-do': removeLive(+b.dataset.i, b.dataset.v === 'always'); break;
     case 'swap-pick': swapExercise(+b.dataset.i, id); break;
     case 'pain': { const it = S.active.items[+b.dataset.i], v = +b.dataset.v; it.pain = it.pain === v ? null : v; persist(); renderTrain(); break; }
     case 'rest-add': if (U.rest) { U.rest.end = Math.max(U.rest.end, Date.now()) + 30000; U.rest.total += 30; U.rest.alerted = false; scheduleRestNotif(U.rest.end, U.rest.label); renderRestBar(); } break;
@@ -1767,6 +1903,7 @@ function bindEvents() {
       case 'clip-rec': case 'clip-pick': saveClip(el.dataset.id, el.files && el.files[0]); return;
       case 'inj-note': { const inj = injuryOf(el.dataset.id); if (inj) { inj.note = el.value.trim().slice(0, 120); persist(); } break; }
       case 'pf-lang': setLang(el.value); break;
+      case 'memOn': S.coach.memOn = el.checked; if (!el.checked) S.coach.backlog = []; else S.coach.sumAt = Math.max(S.coach.sumAt, Date.now()); persist(); renderCoach(); break;
       case 'pf-kg': { const v = num(el.value); S.profile.kg = v && v > 30 && v < 350 ? v : null; persist(); break; }
       case 'pf-rest': S.profile.restSec = +el.value; persist(); break;
       case 'pf-sound': S.profile.sound = el.checked; persist(); break;
@@ -1790,6 +1927,8 @@ function bindEvents() {
     if (el.id === 'c-min') { readCardioDraft(); const k = $('#c-kcal'); if (k) k.textContent = t('kcalEst', { kcal: n0(cardioKcal(U.draftC)) }); }
     if (el.id === 'rBpS' || el.id === 'rBpD') { if (U.draftR) { U.draftR.bpSys = num($('#rBpS').value); U.draftR.bpDia = num($('#rBpD').value); } }
   });
+  /* <details> open state survives re-renders (toggle doesn't bubble, so listen while capturing). */
+  document.addEventListener('toggle', e => { if (e.target && e.target.id === 'coachMemBox') U.memOpen = e.target.open; }, true);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') { flushSave(); return; }
     readTanjur(); syncHealth(false); checkTanjur();

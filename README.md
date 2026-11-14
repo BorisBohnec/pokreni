@@ -70,6 +70,8 @@ Amazfit watches can't be paired with other apps: they only talk to the Zepp app.
 
 What comes through: steps (today and the week's average), last night's sleep, resting heart rate (or the lowest heart rate of the day when Zepp doesn't record a resting value) and workouts you record on the watch. They show on Today and in Profile → Smartwatch, count toward weekly active minutes, preselect the sleep answer in the pre-session check-in, and go to the coach. PoKreni recognises the watch by the app that wrote each record (`com.huami.watch.hmwatchmanager`), so steps from the phone or another app still show, just without the watch label. *Open Zepp* opens the app (or its Play Store page).
 
+**Counted once.** A walk you log in PoKreni and the same walk recorded by the watch count once. An outside workout is treated as a repeat when it's on the same day as something logged here and either covers mostly the same time, or is of similar length (within 40% or 15 minutes) and the same kind of movement (a walk logged by hand later in the day), or of similar length within 3 hours when the kind is unknown. A watch workout during a PoKreni session is part of that session, and two apps recording the same workout count once. Tap one (on Today, or in Profile → Smartwatch, which lists the last 14 days with *Counted*, *Already logged* or *Hidden*) to give it your own name, hide it, or say *It's a different workout*. This only changes PoKreni; the record stays in Zepp and Health Connect. Workout types come from Health Connect (Walk, Run, Strength training…).
+
 The rest timer already sends a notification when your rest ends; turn on PoKreni in the watch's app notifications in Zepp and the watch buzzes too.
 
 ## Exercise animations and videos
@@ -89,7 +91,7 @@ Each warm-up move has an ⓘ button too: an animation, why it helps, how to do i
 
 ## Adding exercises yourself
 
-*Add exercise* on Today (or in the exercise sheet, or during a session) lets you pick any exercise from the library, by area or by typing in the search box (English or Croatian name, muscle, equipment; accents optional, so *cucanj* finds *Čučanj*), and choose **Just today** or **Every** session of that A/B day. Added ones are tagged and can be removed with ✕. During a session it goes straight into the session, optionally kept for next time. Injuries still apply: exercises an injury rules out can't be picked.
+*Add exercise* on Today (or in the exercise sheet, or during a session) lets you pick any exercise from the library, by area or by typing in the search box (English or Croatian name, muscle, equipment; accents optional, so *cucanj* finds *Čučanj*), and choose **Just today** or **Every** session of that A/B day. Added ones are tagged and can be removed with ✕. During a session it goes straight into the session, optionally kept for next time. **Remove** (in the open exercise's tools) takes any exercise out of the session you're doing, with Undo; if you've logged sets of it, or it's one you keep in every session of that A/B day, it asks first and offers to stop adding it. Injuries still apply: exercises an injury rules out can't be picked.
 
 The exercise library at the bottom of Learn has the same search.
 
@@ -113,6 +115,7 @@ The coach answers questions about training, pain, recovery and food, using your 
 - **Safety first.** Questions that sound like an emergency (chest pain, fainting, numbness, and the like, in English or Croatian) show the 112 card before any AI answer. The coach is told never to diagnose or suggest medicines, and to send you to a doctor when pain or symptoms call for it.
 - **Your notes.** Profile → *For the coach* is a short free-text field (injuries, what your doctor said, how flexible you are) that's added to every question. The app itself assumes nothing about your body, job or schedule; the coach is told to rely only on these notes.
 - **Own tab.** The coach has its own tab in the bottom bar; Profile is the round button at the top right.
+- **Memory.** After a chat the coach saves a 1–4 point summary (goals, decisions, pains mentioned, the advice and its numbers) and later chats get the newest ones that fit (about 1,800 characters). A summary is made when you tap *New chat*, after 8 new messages, or when a chat has been quiet for 2 hours; if there's no connection it's tried again later. *Coach's memory* above the chat lists them: delete one, *Forget everything*, or switch *Remember our chats* off. Summaries are kept in PoKreni's data (and backups), up to 40.
 
 Your question, the last few messages and that summary go to the AI service; nothing else leaves the phone.
 

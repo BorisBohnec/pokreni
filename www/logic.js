@@ -434,6 +434,65 @@
     return { today: S[today] || 0, avg: prev.length ? Math.round(prev.reduce((a, k) => a + S[k], 0) / prev.length) : 0, days: prev.length };
   }
 
+  /* ---------- workouts other apps put in Health Connect ---------- */
+  /* Names for the session types the bridge reports (typeName). */
+  const HC_TYPES = {
+    walking: { en: 'Walk', hr: 'Hodanje' }, hiking: { en: 'Hike', hr: 'Planinarenje' }, running: { en: 'Run', hr: 'Trčanje' },
+    running_treadmill: { en: 'Treadmill run', hr: 'Trčanje na traci' }, biking: { en: 'Bike ride', hr: 'Vožnja biciklom' },
+    biking_stationary: { en: 'Stationary bike', hr: 'Sobni bicikl' }, elliptical: { en: 'Elliptical', hr: 'Orbitrek' }, rowing: { en: 'Rowing', hr: 'Veslanje' },
+    rowing_machine: { en: 'Rowing machine', hr: 'Veslački ergometar' }, stair_climbing: { en: 'Stair climbing', hr: 'Penjanje stubama' },
+    stair_climbing_machine: { en: 'Stair machine', hr: 'Stepper' }, strength_training: { en: 'Strength training', hr: 'Trening snage' },
+    weightlifting: { en: 'Weightlifting', hr: 'Dizanje utega' }, calisthenics: { en: 'Calisthenics', hr: 'Kalistenika' }, hiit: { en: 'HIIT', hr: 'HIIT' },
+    stretching: { en: 'Stretching', hr: 'Istezanje' }, yoga: { en: 'Yoga', hr: 'Joga' }, pilates: { en: 'Pilates', hr: 'Pilates' },
+    swimming_pool: { en: 'Swim (pool)', hr: 'Plivanje (bazen)' }, swimming_open_water: { en: 'Open-water swim', hr: 'Plivanje na otvorenom' },
+    dancing: { en: 'Dancing', hr: 'Ples' }, soccer: { en: 'Football', hr: 'Nogomet' }, basketball: { en: 'Basketball', hr: 'Košarka' },
+    tennis: { en: 'Tennis', hr: 'Tenis' }, badminton: { en: 'Badminton', hr: 'Badminton' }, table_tennis: { en: 'Table tennis', hr: 'Stolni tenis' },
+    martial_arts: { en: 'Martial arts', hr: 'Borilačke vještine' }, boxing: { en: 'Boxing', hr: 'Boks' }, exercise_class: { en: 'Exercise class', hr: 'Grupni trening' }
+  };
+  /* The kind of movement, so a watch walk can be matched with a walk logged here (PoKreni's own types use the hc names from exercises.js). */
+  const MOVE_KIND = { walking: 'walk', hiking: 'walk', running: 'run', running_treadmill: 'run', biking: 'bike', biking_stationary: 'bike', bikingStationary: 'bike',
+    elliptical: 'elliptical', rowing: 'row', rowing_machine: 'row', strength: 'strength', strength_training: 'strength', weightlifting: 'strength', calisthenics: 'strength', hiit: 'strength' };
+  const H3 = 3 * 3600000;
+  /* Is this outside workout the same one as something logged in PoKreni (a walk or ride, or a session)? Returns that entry or null.
+     Same day, and either mostly the same stretch of time, or of similar length and the same kind of movement (a walk logged by hand at
+     some other time of day), or of similar length within 3 hours when either kind is unknown. */
+  function extDuplicateOf(x, data, EX) {
+    const xs = Date.parse(x.start), xe = Date.parse(x.end), xk = MOVE_KIND[x.typeName] || '';
+    if (!(xe > xs)) return null;
+    const mine = (data.cardio || []).filter(c => c.date === x.date && c.start).map(c => {
+      const s = Date.parse(c.start), e = EX && EX.byId[c.type];
+      return { kind: 'cardio', id: c.id, type: c.type, s, e: s + (+c.minutes || 0) * 60000, mins: +c.minutes || 0, move: (e && MOVE_KIND[e.hc]) || '' };
+    }).concat((data.sessions || []).filter(s => s.date === x.date && s.start && s.end).map(s => {
+      const a = Date.parse(s.start), b = Date.parse(s.end);
+      return { kind: 'session', id: s.id, name: s.name, s: a, e: b, mins: Math.round((b - a) / 60000), move: 'strength' };
+    }));
+    for (const m of mine) {
+      const shorter = Math.min(xe - xs, m.e - m.s), overlap = Math.min(xe, m.e) - Math.max(xs, m.s);
+      if (shorter > 0 && overlap >= shorter / 2) return m;
+      const similar = Math.abs(x.mins - m.mins) <= Math.max(15, 0.4 * Math.max(x.mins, m.mins));
+      if (!similar) continue;
+      if (xk && m.move && xk === m.move) return m;
+      if ((!xk || !m.move) && Math.abs(xs - m.s) <= H3) return m;
+    }
+    return null;
+  }
+  /* Outside workouts as the app shows them: name (yours, the app's title or the type), whether each one is counted, and why not.
+     prefs[id] = { hide: true } hides one, { hide: false } counts it even when it looks like a duplicate, { name } renames it.
+     Two outside apps recording the same workout count once (the first one seen). */
+  function extView(data, EX) {
+    const all = ((data.hc && data.hc.extAll) || []).slice().sort((a, b) => (a.start < b.start ? -1 : 1));
+    const prefs = (data.settings && data.settings.hcExt) || {}, kept = [];
+    return all.map(x => {
+      const p = prefs[x.id] || {}, dupOf = extDuplicateOf(x, data, EX);
+      const twin = !dupOf && kept.find(k => { const sh = Math.min(Date.parse(x.end) - Date.parse(x.start), Date.parse(k.end) - Date.parse(k.start)); return sh > 0 && Math.min(Date.parse(x.end), Date.parse(k.end)) - Math.max(Date.parse(x.start), Date.parse(k.start)) >= sh / 2; });
+      const counted = p.hide === true ? false : p.hide === false ? true : !dupOf && !twin;
+      const v = Object.assign({}, x, { dupOf: dupOf || (twin ? { kind: 'ext', id: twin.id, app: twin.app } : null), hidden: p.hide === true, forced: p.hide === false, counted, custom: p.name || '' });
+      if (counted) kept.push(x);
+      return v;
+    }).reverse();
+  }
+  function extMinutes(view) { const o = {}; view.forEach(x => { if (x.counted) o[x.date] = (o[x.date] || 0) + x.mins; }); return o; }
+
   /* ---------- search ---------- */
   /* Lower case without accents (č→c, đ→d), so "cucanj" finds "Čučanj". */
   function fold(s) { return String(s || '').toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
@@ -465,5 +524,5 @@
     weekStats, weeksBack, autoCheck, retestStatus, liftHistory,
     muscleSets, muscleLevel, RANKS, RANK_SETS, rankFor, muscleRanks, leastTrained,
     injuryHit, defaultItem, adjustForInjuries, focusActive, focusWeek, pickFocusExercise, buildWorkout, validateWorkout, validateFocus, groupsIn,
-    fold, searchExercises, exercisesIn, HC_APPS, ZEPP, appName, watchStatus, stepsSummary };
+    fold, searchExercises, exercisesIn, HC_APPS, ZEPP, appName, watchStatus, stepsSummary, HC_TYPES, extDuplicateOf, extView, extMinutes };
 });
