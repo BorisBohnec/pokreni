@@ -205,13 +205,20 @@
     });
     return out;
   }
-  /* Colour level 0–5 from sets per week. */
-  function muscleLevel(perWeek) { const v = +perWeek || 0; return v <= 0 ? 0 : v <= 2 ? 1 : v <= 4 ? 2 : v <= 6 ? 3 : v <= 9 ? 4 : 5; }
+  /* Colour level 0–4 from sets per week, on the same lines as the ranks: none, under 3, 3–5, 6–9, 10 or more. */
+  const LEVEL_SETS = [3, 6, 10];
+  function muscleLevel(perWeek) { const v = +perWeek || 0; return v <= 0 ? 0 : v < 3 ? 1 : v < 6 ? 2 : v < 10 ? 3 : 4; }
 
-  /* Ranks reward steady weeks, not piles of sets: a week counts when a muscle gets RANK_SETS or more. */
-  const RANKS = [{ id: 'start', weeks: 1 }, { id: 'bronze', weeks: 2 }, { id: 'silver', weeks: 4 }, { id: 'gold', weeks: 8 }, { id: 'diamond', weeks: 16 }];
-  const RANK_SETS = 3;
-  function rankFor(weeks) { let r = null; RANKS.forEach(x => { if (weeks >= x.weeks) r = x.id; }); return r; }
+  /* A rank needs both: enough weeks in a row, each with enough sets. So one huge week can't jump a rank, and 3 sets a
+     week can't reach Gold. About 10 sets a week is a common target for building muscle; past that, more weeks count. */
+  const RANKS = [{ id: 'start', weeks: 1, sets: 3 }, { id: 'bronze', weeks: 2, sets: 3 }, { id: 'silver', weeks: 4, sets: 6 },
+    { id: 'gold', weeks: 8, sets: 10 }, { id: 'diamond', weeks: 16, sets: 10 }];
+  const RANK_SETS = 3; /* the least a week needs to count at all */
+  /* streakAt(sets) gives the weeks in a row with that many sets or more. */
+  function rankFor(streakAt) {
+    if (typeof streakAt === 'number') { const n = streakAt; streakAt = () => n; }
+    let r = null; RANKS.forEach(x => { if (streakAt(x.sets) >= x.weeks) r = x.id; }); return r;
+  }
   function muscleRanks(sessions, B, today) {
     const fin = (sessions || []).filter(s => s && s.end && isKey(s.date));
     const thisWeek = weekStart(today);
@@ -221,16 +228,22 @@
     const weeks = [];
     for (let i = 0; i < n; i++) { const w = addDays(firstWeek, 7 * i); weeks.push(muscleSets(fin, B, w, addDays(w, 6))); }
     B.muscleIds.forEach(m => {
-      const met = weeks.map(w => w[m] >= RANK_SETS);
-      const cur = met[n - 1];
-      let streak = 0;
-      for (let i = cur ? n - 1 : n - 2; i >= 0 && met[i]; i--) streak++;
+      /* Weeks in a row with at least `need` sets. This week counts once it gets there; until then the run is
+         counted up to last week, so a new week doesn't break it. */
+      const streakAt = need => {
+        const met = weeks.map(w => w[m] >= need);
+        let k = 0; for (let i = met[n - 1] ? n - 1 : n - 2; i >= 0 && met[i]; i--) k++;
+        return k;
+      };
+      const streak = streakAt(RANK_SETS), cur = weeks[n - 1][m] >= RANK_SETS;
       let best = 0, run = 0;
-      met.forEach(x => { run = x ? run + 1 : 0; best = Math.max(best, run); });
-      const rank = rankFor(streak);
-      const nxt = RANKS.find(x => x.weeks > streak) || null;
-      out[m] = { streak, best, rank, next: nxt ? { id: nxt.id, need: nxt.weeks - streak } : null,
-        thisWeek: weeks[n - 1][m], metThisWeek: !!cur, atRisk: !cur && streak > 0, ever: weeks.some(w => w[m] > 0) };
+      weeks.forEach(w => { run = w[m] >= RANK_SETS ? run + 1 : 0; best = Math.max(best, run); });
+      const rank = rankFor(streakAt);
+      const i = RANKS.findIndex(x => x.id === rank), nxt = RANKS[i + 1] || null;
+      out[m] = { streak, best, rank,
+        next: nxt ? { id: nxt.id, sets: nxt.sets, weeks: nxt.weeks, have: streakAt(nxt.sets), need: nxt.weeks - streakAt(nxt.sets) } : null,
+        thisWeek: weeks[n - 1][m], metThisWeek: cur, atRisk: !cur && streak > 0, ever: weeks.some(w => w[m] > 0),
+        tiers: RANKS.map(x => ({ id: x.id, sets: x.sets, weeks: x.weeks, have: Math.min(streakAt(x.sets), x.weeks) })) };
     });
     return out;
   }
@@ -522,7 +535,7 @@
   return { ytId, pad, dkey, isKey, parseKey, addDays, daysBetween, weekStart, clamp, num, READINESS_QS, bpHigh, readiness,
     sessionsIn, setsFor, roundKg, target, painZone, evaluate, activeKcal, STRENGTH_MET, sessionMinutes, finisherMinutes,
     weekStats, weeksBack, autoCheck, retestStatus, liftHistory,
-    muscleSets, muscleLevel, RANKS, RANK_SETS, rankFor, muscleRanks, leastTrained,
+    muscleSets, muscleLevel, LEVEL_SETS, RANKS, RANK_SETS, rankFor, muscleRanks, leastTrained,
     injuryHit, defaultItem, adjustForInjuries, focusActive, focusWeek, pickFocusExercise, buildWorkout, validateWorkout, validateFocus, groupsIn,
     fold, searchExercises, exercisesIn, HC_APPS, ZEPP, appName, watchStatus, stepsSummary, HC_TYPES, extDuplicateOf, extView, extMinutes };
 });

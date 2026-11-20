@@ -799,17 +799,25 @@ function bmShape(sh, ox, cls, attrs, inner) {
   if (sh.el === 'ellipse') return `<ellipse cx="${sh.cx + ox}" cy="${sh.cy}" rx="${sh.rx}" ry="${sh.ry}" class="${cls}" ${attrs || ''}>${inner || ''}</ellipse>`;
   return `<circle cx="${sh.cx + ox}" cy="${sh.cy}" r="${sh.r}" class="${cls}" ${attrs || ''}>${inner || ''}</circle>`;
 }
-/* Front and back figure. Muscles are shaded by sets per week; injured areas are red (only the marked side). */
+/* The injury mark: a warning triangle (yellow = ease off, red = avoid), so colour on the map only ever means sets. */
+const WARN_TRI = 'M0,-6.6 L6.6,5.2 L-6.6,5.2 Z', WARN_BANG = 'M0,-2.4 V1 M0,3.05 v.01';
+const warnMark = (level, x, y, s) => `<g class="bm-warn ${level}" transform="translate(${x} ${y})${s && s !== 1 ? ` scale(${s})` : ''}"><path class="tri" d="${WARN_TRI}"/><path class="bang" d="${WARN_BANG}"/></g>`;
+const warnIcon = level => `<svg class="warn-ic ${level}" viewBox="-8 -8 16 16" aria-hidden="true">${warnMark(level, 0, 0)}</svg>`;
+const shapeCenter = (sh, ox) => (sh.el === 'rect' ? [sh.x + ox + sh.w / 2, sh.y + sh.h / 2] : [sh.cx + ox, sh.cy]);
+/* Front and back figure. Muscles are shaded by sets per week; an injured area gets a triangle (only the marked side). */
 function bodySvg(levelOf) {
   const W = 120, H = 262, gap = 16;
   const hurt = sh => { const inj = injuryOf(sh.a); return inj && (sh.side === 'C' || !inj.side || inj.side === 'both' || inj.side === sh.side) ? inj : null; };
   const view = (v, ox) => {
     const sil = BODY.SILHOUETTE.map(sh => bmShape(sh, ox, 'bm-sil')).join('');
-    const muscles = BODY.SHAPES.filter(sh => sh.v === v && !sh.joint).map(sh => { const inj = hurt(sh);
-      return bmShape(sh, ox, `bm-m lv${levelOf(sh.a)}${inj ? ' inj-' + inj.level : ''}`, `data-act="area" data-id="${sh.a}" data-side="${sh.side}"`, `<title>${esc(areaName(sh.a))}</title>`); }).join('');
-    const joints = BODY.SHAPES.filter(sh => sh.v === v && sh.joint).map(sh => { const inj = hurt(sh);
+    const shapes = BODY.SHAPES.filter(sh => sh.v === v);
+    const muscles = shapes.filter(sh => !sh.joint).map(sh => { const inj = hurt(sh);
+      return bmShape(sh, ox, `bm-m lv${levelOf(sh.a)}${inj ? ' inj-' + inj.level : ''}`, `data-act="area" data-id="${sh.a}" data-side="${sh.side}"`, `<title>${esc(areaName(sh.a))}${inj ? ' · ' + esc(t(inj.level === 'avoid' ? 'injAvoid' : 'injEase')) : ''}</title>`); }).join('');
+    const joints = shapes.filter(sh => sh.joint).map(sh => { const inj = hurt(sh);
       return bmShape(sh, ox, `bm-j${inj ? ' inj-' + inj.level : ''}`) + bmShape(Object.assign({}, sh, { r: 8 }), ox, 'bm-hit', `data-act="area" data-id="${sh.a}" data-side="${sh.side}"`, `<title>${esc(areaName(sh.a))}</title>`); }).join('');
-    return `<g>${sil}${muscles}${joints}<text x="${ox + 60}" y="${H + 13}" class="bm-label" text-anchor="middle">${esc(t(v === 'f' ? 'front' : 'backView'))}</text></g>`;
+    /* Triangles last, so they sit on top; they let taps through to the part underneath. */
+    const marks = shapes.map(sh => { const inj = hurt(sh); if (!inj) return ''; const [x, y] = shapeCenter(sh, ox); return warnMark(inj.level, x, y, sh.joint ? 0.85 : 1); }).join('');
+    return `<g>${sil}${muscles}${joints}${marks}<text x="${ox + 60}" y="${H + 13}" class="bm-label" text-anchor="middle">${esc(t(v === 'f' ? 'front' : 'backView'))}</text></g>`;
   };
   return `<svg class="bodymap" viewBox="0 0 ${W * 2 + gap} ${H + 18}" role="img" aria-label="${esc(t('bodyMap'))}">${view('f', 0)}${view('b', W + gap)}</svg>`;
 }
@@ -824,20 +832,33 @@ function bodyCard(k) {
   else if (lt.list.length) focusHtml = `<div class="least"><p class="small">${esc(t('leastLine', { list: lt.list.map(m => `${areaName(m).toLowerCase()} (${n1(lt.sets[m])})`).join(', ') }))}</p>
       <div class="row2"><button class="btn small" data-act="focus-start" data-id="${lt.list[0]}">${icon('target')}${esc(t('focusOn', { muscle: areaName(lt.list[0]).toLowerCase() }))}</button><button class="btn small ghost" data-act="coach-ask" data-q="${esc(t('qLeast'))}">${icon('chat')}${esc(t('askCoach'))}</button></div></div>`;
   else focusHtml = `<p class="muted small">${esc(t('leastNone'))}</p>`;
-  const sw = i => `<i class="sw lv${i}"></i>`;
+  /* The colour steps sit on the same lines as the ranks (3, 6, 10 sets a week). */
+  const scale = ['0', '<3', '3+', '6+', '10+'].map((l, i) => `<span class="bm-step"><i class="sw lv${i}"></i>${esc(l)}</span>`).join('');
   return `<section class="card body-card"><div class="card-head"><h2>${esc(t('bodyMap'))}</h2><div class="seg small">${[7, 28].map(v => `<button data-act="bm-range" data-v="${v}" aria-pressed="${days === v}">${esc(t(v === 7 ? 'last7d' : 'last4w'))}</button>`).join('')}</div></div>
     ${bodySvg(lvl)}
-    <div class="bm-legend"><span>${sw(0)}${sw(1)}${sw(2)}${sw(3)}${sw(4)}${sw(5)} ${esc(t('setsPerWeek'))}</span><span><i class="sw inj-ease"></i>${esc(t('injEase'))}</span><span><i class="sw inj-avoid"></i>${esc(t('injAvoid'))}</span></div>
+    <div class="bm-legend"><span class="bm-scale">${scale}<span>${esc(t('setsPerWeek'))}</span></span><span>${warnIcon('ease')}${esc(t('injEase'))}</span><span>${warnIcon('avoid')}${esc(t('injAvoid'))}</span></div>
     ${S.injuries.length ? `<div class="chips wrap inj-chips">${S.injuries.map(x => `<button class="chip-btn inj ${x.level}" data-act="area" data-id="${x.area}">${esc(injuryName(x))} · ${esc(t(x.level === 'avoid' ? 'injAvoid' : 'injEase'))}</button>`).join('')}</div>` : ''}
     <div class="row2"><button class="btn small" data-act="injuries">${icon('flag')}${esc(t('markInjury'))}</button><button class="btn small ghost" data-act="pick">${icon('go')}${esc(t('buildWorkout'))}</button></div>
     ${focusHtml}
     <p class="muted small">${esc(t('bodyMapNote'))}</p></section>`;
 }
+/* The rank rule in words, from PK.RANKS so the text can't drift from the logic. */
+const rankRules = () => PK.RANKS.map(x => t('rankRule', { rank: t('rank_' + x.id), n: x.weeks, w: weeksWord(x.weeks), sets: x.sets })).join(', ');
+/* Each rank with what it needs and how far this muscle is: done, the next one (weeks so far), or later. */
+function rankLadder(r) {
+  const at = PK.RANKS.findIndex(x => x.id === r.rank);
+  return `<ol class="rank-ladder">${r.tiers.map((x, i) => {
+    const done = i <= at, next = i === at + 1;
+    return `<li class="${done ? 'done' : next ? 'next' : 'later'}"><span class="rank-badge ${x.id}">${esc(t('rank_' + x.id))}</span>
+      <span class="rl-need">${esc(t('rankNeed', { n: x.weeks, w: weeksWord(x.weeks), sets: x.sets }))}</span>
+      <span class="rl-have">${done ? icon('check') : `${x.have}/${x.weeks}`}</span></li>`;
+  }).join('')}</ol>`;
+}
 function rankText(r) {
   if (r.streak) {
     const parts = [t('streakN', { n: r.streak, w: weeksWord(r.streak) })];
     if (r.atRisk) parts.push(t('keepStreak'));
-    else if (r.next) parts.push(t('nextRank', { rank: t('rank_' + r.next.id), n: r.next.need, w: weeksWord(r.next.need) }));
+    else if (r.next) parts.push(t('nextRankSets', { rank: t('rank_' + r.next.id), n: r.next.need, w: weeksWord(r.next.need), sets: r.next.sets }));
     return parts.join(' · ');
   }
   if (r.thisWeek > 0) return t('thisWeekSets', { n: n1(r.thisWeek), need: PK.RANK_SETS });
@@ -846,9 +867,9 @@ function rankText(r) {
 function ranksCard(k) {
   const R = PK.muscleRanks(S.sessions, BODY, k);
   const rows = BODY.muscleIds.slice().sort((a, b) => R[b].streak - R[a].streak || R[b].thisWeek - R[a].thisWeek || BODY.muscleIds.indexOf(a) - BODY.muscleIds.indexOf(b));
-  return `<section class="card"><h2>${esc(t('ranksTitle'))}</h2><p class="muted small">${esc(t('ranksAbout', { n: PK.RANK_SETS }))}</p>
+  return `<section class="card"><h2>${esc(t('ranksTitle'))}</h2><p class="muted small">${esc(t('ranksRule', { list: rankRules() }))}</p>
     <ul class="rank-list">${rows.map(m => { const r = R[m], inj = injuryOf(m); return `<li><button class="rank-row" data-act="area" data-id="${m}">
-      <span class="rk-main"><span class="rk-name">${esc(areaName(m))}${inj ? ` <span class="inj-dot ${inj.level}" title="${esc(t(inj.level === 'avoid' ? 'injAvoid' : 'injEase'))}"></span>` : ''}</span><small>${esc(rankText(r))}</small></span>
+      <span class="rk-main"><span class="rk-name">${esc(areaName(m))}${inj ? ` <span class="rk-inj" title="${esc(t(inj.level === 'avoid' ? 'injAvoid' : 'injEase'))}">${warnIcon(inj.level)}</span>` : ''}</span><small>${esc(rankText(r))}</small></span>
       <span class="rank-badge ${r.rank || 'none'}">${esc(r.rank ? t('rank_' + r.rank) : '–')}</span></button></li>`; }).join('')}</ul></section>`;
 }
 function weeksChart(weeks) {
@@ -933,7 +954,7 @@ function renderProfile() {
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.7.1 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.8 · ${esc(t('aboutLine'))}</p>`;
 }
 function weightField() {
   const w = weightSource();
@@ -1284,6 +1305,7 @@ const SHEETS = {
       const exChip = e => { const blocked = PK.injuryHit(e.id, S.injuries, BODY).level === 'avoid'; return `<button class="chip-btn ${blocked ? 'blocked' : ''}" data-act="ex" data-id="${e.id}">${esc(tx(e.name))}</button>`; };
       body += `<div class="sum-stats"><div><b>${n1(s7)}</b><span>${esc(t('sets7'))}</span></div><div><b>${n1(s28)}</b><span>${esc(t('sets28'))}</span></div><div><b>${r.rank ? esc(t('rank_' + r.rank)) : '–'}</b><span>${esc(t('rankLabel'))}</span></div></div>
         <p class="small">${esc(rankText(r))}</p>
+        ${rankLadder(r)}
         <h3>${esc(t('trainsIt'))}</h3><div class="chips wrap">${direct.map(exChip).join('')}</div>
         ${helps.length ? `<p class="muted small">${esc(t('alsoHelps'))}: ${esc(helps.map(e => tx(e.name)).join(', '))}</p>` : ''}
         <div class="row2"><button class="btn" data-act="wk-build-m" data-id="${id}">${icon('go')}${esc(t('buildSession'))}</button>

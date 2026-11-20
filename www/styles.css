@@ -21,7 +21,9 @@
   --f-display:"Archivo","Arial Narrow",system-ui,sans-serif;
   --f-body:"Public Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --r:18px; --r-sm:11px;
-  --bm-sil:#E7EDF5; --bm0:#D2DCE9; --bm1:#CFE2F8; --bm2:#A6C9F1; --bm3:#71A8E7; --bm4:#3680D6; --bm5:#1A55AD; --bm-joint:#9DB0C7;
+  --bm-sil:#E7EDF5; --bm0:#D2DCE9; --bm1:#EE8A3A; --bm2:#E2582A; --bm3:#C62828; --bm4:#7A1616; --bm-joint:#9DB0C7;
+  /* body map: one warm ramp, light→dark = more sets (validated: monotone lightness, ≥0.06 steps, first step ≥2:1 on the figure) */
+  --warn-ease:#FACC15; --warn-avoid:#DC2626; --warn-edge:#1E293B; --warn-bang-avoid:#FFFFFF;
   --inj:#D23B3B; --inj-soft:#F9D7D5;
   --fig-far:#9AAAC0; --fig-frame:#7D8DA5; --fig-pad:#C4D3E6; --fig-prop:#AFC0D6;
   --sat:var(--safe-area-inset-top,env(safe-area-inset-top,0px)); --sab:var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px));
@@ -34,7 +36,9 @@
     --sky:#6FB9EE;
     --good:#4CC57E; --good-bg:#12301F; --warn:#E8B64A; --warn-bg:#342A10; --crit:#F07474; --crit-bg:#3A1C1C; --crit-fill:#E05353;
     --scrim:rgba(0,0,0,.62); --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
-    --bm-sil:#162131; --bm0:#24324A; --bm1:#1D3A5D; --bm2:#245384; --bm3:#2F70B6; --bm4:#4F95E4; --bm5:#98C6F8; --bm-joint:#5A6B83;
+    --bm-sil:#162131; --bm0:#24324A; --bm1:#9A4129; --bm2:#CF4E31; --bm3:#F65B43; --bm4:#FF9C80; --bm-joint:#5A6B83;
+    /* dark: the same ramp's anchor flipped, dim→bright = more sets */
+    --warn-ease:#FACC15; --warn-avoid:#EF4444; --warn-edge:#0B1220; --warn-bang-avoid:#FFFFFF;
     --inj:#F06262; --inj-soft:#4A2224;
     --fig-far:#56657C; --fig-frame:#6D7D95; --fig-pad:#33445C; --fig-prop:#3A4A60;
     color-scheme:dark;
@@ -374,12 +378,17 @@ body.resting .app{padding-bottom:calc(190px + var(--sab))}
 .bm-sil{fill:var(--bm-sil)}
 .bm-m{stroke:var(--surface);stroke-width:1.2;cursor:pointer;transition:fill .2s}
 .bm-m.lv0,.sw.lv0{fill:var(--bm0);background:var(--bm0)} .bm-m.lv1,.sw.lv1{fill:var(--bm1);background:var(--bm1)} .bm-m.lv2,.sw.lv2{fill:var(--bm2);background:var(--bm2)}
-.bm-m.lv3,.sw.lv3{fill:var(--bm3);background:var(--bm3)} .bm-m.lv4,.sw.lv4{fill:var(--bm4);background:var(--bm4)} .bm-m.lv5,.sw.lv5{fill:var(--bm5);background:var(--bm5)}
-.bm-m.inj-ease{fill:var(--inj-soft);stroke:var(--inj);stroke-width:1.8}
-.bm-m.inj-avoid{fill:var(--inj);stroke:var(--inj)}
+.bm-m.lv3,.sw.lv3{fill:var(--bm3);background:var(--bm3)} .bm-m.lv4,.sw.lv4{fill:var(--bm4);background:var(--bm4)}
+.bm-warn{pointer-events:none}
+.bm-warn .tri{stroke:var(--warn-edge);stroke-width:1.3;stroke-linejoin:round}
+.bm-warn .bang{fill:none;stroke-width:1.9;stroke-linecap:round}
+.bm-warn.ease .tri{fill:var(--warn-ease)} .bm-warn.ease .bang{stroke:var(--warn-edge)}
+.bm-warn.avoid .tri{fill:var(--warn-avoid)} .bm-warn.avoid .bang{stroke:var(--warn-bang-avoid)}
+.warn-ic{width:15px;height:15px;flex:none;overflow:visible}
+.rk-inj{display:inline-flex;vertical-align:-2px;margin-left:4px}
+.bm-scale{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap}
+.bm-step{display:inline-flex;align-items:center;gap:3px;font-variant-numeric:tabular-nums}
 .bm-j{fill:var(--surface);stroke:var(--bm-joint);stroke-width:1.1;pointer-events:none}
-.bm-j.inj-ease{fill:var(--inj-soft);stroke:var(--inj);stroke-width:1.8}
-.bm-j.inj-avoid{fill:var(--inj);stroke:var(--inj)}
 .bm-hit{fill:transparent;cursor:pointer}
 .bm-m:active,.bm-hit:active{opacity:.75}
 .bm-label{font:600 10px var(--f-body);fill:var(--muted)}
@@ -539,3 +548,13 @@ body.resting .app{padding-bottom:calc(190px + var(--sab))}
 .mem-list li.dragging .mem-handle{cursor:grabbing;color:var(--accent)}
 .mem-list li.unused{opacity:.55}
 .chat-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+
+/* 1.8: rank ladder in the muscle sheet */
+.rank-ladder{list-style:none;margin:8px 0 14px;padding:0;display:grid;gap:6px}
+.rank-ladder li{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:12px;background:var(--bg);border:1px solid var(--line);font-size:14px}
+.rank-ladder .rank-badge{min-width:74px;text-align:center;flex:none}
+.rank-ladder .rl-need{flex:1;min-width:0}
+.rank-ladder .rl-have{font-weight:700;font-variant-numeric:tabular-nums;color:var(--muted)}
+.rank-ladder .rl-have .ic{width:18px;height:18px;color:var(--good, #16a34a)}
+.rank-ladder li.next{border-color:var(--accent)} .rank-ladder li.next .rl-have{color:var(--accent)}
+.rank-ladder li.later{opacity:.6}

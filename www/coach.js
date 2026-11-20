@@ -127,6 +127,8 @@
       const R = PK.muscleRanks(D.sessions, B, today);
       const streaks = B.muscleIds.filter(m => R[m].streak).map(m => `${mn(m)} ${R[m].streak}`);
       if (streaks.length) L.push(`Weeks in a row with ${PK.RANK_SETS}+ sets: ${streaks.join(', ')}.`);
+      const ranked = B.muscleIds.filter(m => R[m].rank).map(m => `${mn(m)} ${R[m].rank}${R[m].next ? ` (next ${R[m].next.id}: ${R[m].next.need} more week(s) of ${R[m].next.sets}+ sets)` : ''}`);
+      if (ranked.length) L.push(`Ranks in the app (weeks in a row × sets a week: ${PK.RANKS.map(x => `${x.id} ${x.weeks}×${x.sets}+`).join(', ')}): ${ranked.join('; ')}.`);
       const inj = D.injuries || [];
       L.push(inj.length ? `Injuries marked in the app: ${inj.map(x => `${x.side === 'L' ? 'left ' : x.side === 'R' ? 'right ' : ''}${mn(x.area)}: ${x.level === 'avoid' ? 'AVOID loading it' : 'ease off (lighter, fewer sets)'} since ${x.since}${x.note ? ` ("${String(x.note).slice(0, 120)}")` : ''}`).join('; ')}. The app already swaps out exercises that load an AVOID area and lightens those for an ease-off area.` : 'Injuries marked in the app: none.');
       if (PK.focusActive(D.focus, today)) L.push(`Focus block running: ${mn(D.focus.muscle)} with ${exn(D.focus.ex)} added to each session, week ${PK.focusWeek(D.focus, today)} of ${D.focus.weeks}.`);

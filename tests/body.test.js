@@ -34,14 +34,15 @@ test('sets per muscle: main muscles count 1, supporting 0.5; unticked sets, fini
   const s = [sess('2026-11-02', [it('goblet_squat', 3, 2), { ex: 'bike_stationary', mins: 10, sets: [{ mins: 10, done: true }] }]), sess('2026-10-01', [it('goblet_squat', 3)])];
   const m = PK.muscleSets(s, B, '2026-10-27', '2026-11-08');
   assert.equal(m.quads, 2); assert.equal(m.glutes, 2); assert.equal(m.abs, 1); assert.equal(m.lower_back, 1); assert.equal(m.chest, 0);
-  assert.deepEqual([0, 1, 3, 5, 7, 12].map(PK.muscleLevel), [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual([0, 1, 2.5, 3, 5.5, 6, 9.5, 10, 20].map(PK.muscleLevel), [0, 1, 1, 2, 2, 3, 3, 4, 4]);
 });
 
 test('ranks: steady weeks build a streak; the week in progress doesn\'t break it yet', () => {
   const weeks = ['2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26', '2026-11-02'];
   const s = weeks.map(w => sess(w, [it('lat_pulldown', 3)]));
   let r = PK.muscleRanks(s, B, '2026-11-07').lats;
-  assert.equal(r.streak, 5); assert.equal(r.rank, 'silver'); assert.deepEqual(r.next, { id: 'gold', need: 3 });
+  /* 3 sets a week for 5 weeks: steady, but not enough sets for Silver (6+) */
+  assert.equal(r.streak, 5); assert.equal(r.rank, 'bronze'); assert.deepEqual(r.next, { id: 'silver', sets: 6, weeks: 4, have: 0, need: 4 });
   r = PK.muscleRanks(s, B, '2026-11-10').lats; /* new week, nothing yet */
   assert.equal(r.streak, 5); assert.ok(r.atRisk);
   r = PK.muscleRanks(s, B, '2026-11-17').lats; /* a whole week missed */
@@ -128,4 +129,21 @@ test('coach: injuries, body map and the catalogue reach the prompt; blocks becom
   assert.equal(C.extractBlocks('Cut off <workout>{"title":').workout, 'bad');
   const r = C.renderAnswer('Try this.\n<workout>{"items":[]}</workout>', EX, LS);
   assert.doesNotMatch(r.html, /workout|items/);
+});
+
+test('ranks need enough weeks in a row AND enough sets each week', () => {
+  const wk = ['2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26', '2026-11-02', '2026-11-09'];
+  const rank = (sets, today) => PK.muscleRanks(wk.map((w, i) => sess(w, [it('lat_pulldown', sets[i] || 0)])).filter((x, i) => sets[i]), B, today || '2026-11-14').lats;
+  /* the two screenshots: chest 2 weeks of a few sets, upper back 3 weeks with one big week */
+  assert.equal(rank([0, 0, 0, 0, 3, 3]).rank, 'bronze');
+  let r = rank([0, 0, 0, 4, 4, 20]);
+  assert.equal(r.rank, 'bronze'); assert.deepEqual(r.next, { id: 'silver', sets: 6, weeks: 4, have: 1, need: 3 });
+  r = rank([0, 0, 6, 7, 8, 9]);
+  assert.equal(r.rank, 'silver'); assert.deepEqual(r.next, { id: 'gold', sets: 10, weeks: 8, have: 0, need: 8 });
+  assert.equal(rank([0, 0, 0, 0, 0, 25]).rank, 'start', 'one huge week is still one week');
+  /* the week in progress: last week's run still stands until this week reaches the bar */
+  r = rank([0, 0, 6, 6, 6, 6], '2026-11-16');
+  assert.equal(r.rank, 'silver'); assert.equal(r.atRisk, true);
+  assert.equal(PK.rankFor(() => 20), 'diamond');
+  assert.equal(PK.rankFor(2), 'bronze', 'a plain number is a run that meets every bar');
 });
