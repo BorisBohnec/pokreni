@@ -389,7 +389,7 @@ function renderAll() {
   const views = { today: renderToday, learn: renderLearn, train: renderTrain, progress: renderProgress, profile: renderProfile, coach: renderCoach };
   safely(views[U.tab], '#view-' + U.tab);
   safely(renderRestBar);
-  if (U.sheets.length && !typingIn('#sheetBody')) safely(renderSheet, '#sheetBody');
+  if (U.sheets.length && !typingIn('#sheetBody') && !$('#sheetBody iframe')) safely(renderSheet, '#sheetBody');
 }
 /* One broken card never blanks the whole screen: the error is shown in place so it can be reported. */
 function safely(fn, sel) {
@@ -954,7 +954,7 @@ function renderProfile() {
     <section class="card"><h2>${esc(t('backup'))}</h2><p class="muted small">${esc(t('backupAbout'))}</p>
       <div class="row2"><button class="btn" data-act="export">${esc(t('exportBtn'))}</button><label class="btn ghost file-btn">${esc(t('importBtn'))}<input type="file" id="importFile" accept="application/json,.json" hidden></label></div></section>
     <section class="card"><h2>${esc(t('aboutTitle'))}</h2><p class="muted small">${esc(t('aboutBody'))}</p><p class="muted small">${esc(t('imgCredit'))}</p></section>
-    <p class="about">PoKreni 1.8 · ${esc(t('aboutLine'))}</p>`;
+    <p class="about">PoKreni 1.9 · ${esc(t('aboutLine'))}</p>`;
 }
 function weightField() {
   const w = weightSource();
@@ -1024,10 +1024,29 @@ function openSheet(kind, args, replace) {
   if (el.hidden) { el.hidden = false; document.body.classList.add('locked'); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open'))); }
   $('#sheetPanel').scrollTop = 0;
 }
+/* Removes any playing video. Called before a sheet closes, when the app goes to the background and before opening
+   another app: an iframe's own history entries would otherwise swallow the next "back" and leave the sheet stuck. */
+function stopVideos() { U.ytPlay = null; $$('iframe').forEach(f => { try { f.src = 'about:blank'; } catch (e) { /* ignore */ } f.remove(); }); }
+/* Links leave through Android (YouTube app or browser), never inside the app's own page. */
+async function openExternal(url) {
+  stopVideos(); if (U.sheets.length) renderSheet();
+  if (Native.Bridge) { try { const r = await Native.Bridge.openUrl({ url }); if (r && r.opened) return; } catch (e) { /* fall back */ } }
+  try { window.open(url, '_blank', 'noopener'); } catch (e) { toast(t('linkFail')); }
+}
 let popClosing = false;
 function closeSheet() {
   if (!U.sheets.length) return;
-  if (!popClosing) { try { if (history.state && history.state.sheet) { history.back(); return; } } catch (e) { /* fall through */ } }
+  stopVideos();
+  if (!popClosing) {
+    try {
+      if (history.state && history.state.sheet) {
+        /* Normally popstate closes it; if history is out of step (it shouldn't be once videos are gone), close it anyway. */
+        const n = U.sheets.length; history.back();
+        setTimeout(() => { if (U.sheets.length === n) { popClosing = true; closeSheet(); popClosing = false; } }, 350);
+        return;
+      }
+    } catch (e) { /* fall through */ }
+  }
   U.sheets.pop();
   if (U.sheets.length) { renderSheet(); return; }
   const el = $('#sheet'); el.classList.remove('open');
@@ -1035,6 +1054,7 @@ function closeSheet() {
 }
 function closeAllSheets() {
   const n = U.sheets.length; if (!n) return;
+  stopVideos();
   U.sheets = [];
   U.ignorePop = true;
   try { history.go(-n); } catch (e) { U.ignorePop = false; }
@@ -1104,10 +1124,13 @@ function mediaBlock(id) {
   else if (m === 'photo') box = `<div class="media-box photo"><img src="img/ex/${id}_0.jpg" alt="${esc(t('startPos'))}"><img class="b" src="img/ex/${id}_1.jpg" alt="${esc(t('endPos'))}"></div>`;
   else if (!vid) box = `<div class="media-box note"><p>${esc(t('videoNone'))}</p></div>`;
   else if (navigator.onLine === false) box = `<div class="media-box note"><p>${esc(t('videoOffline'))}</p></div>`;
-  else box = `<div class="media-box video"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(vid.v)}?rel=0&modestbranding=1&playsinline=1" title="${esc(tx(ex.name))}" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></div>`;
+  /* The player loads only when you tap play, and without fullscreen: the Android WebView (Capacitor) doesn't support
+     fullscreen video, and a live player left behind when you switch apps is what froze the app. */
+  else if (U.ytPlay === id) box = `<div class="media-box video"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(vid.v)}?rel=0&modestbranding=1&playsinline=1&fs=0&autoplay=1" title="${esc(tx(ex.name))}" allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`;
+  else box = `<div class="media-box video"><button class="yt-lite" data-act="yt-play" data-id="${id}" aria-label="${esc(t('playVideo'))}"><img src="https://i.ytimg.com/vi/${encodeURIComponent(vid.v)}/hqdefault.jpg" alt="" loading="lazy" onerror="this.remove()"><span class="yt-btn">${icon('play')}</span></button></div>`;
   let foot = '';
   if (m === 'video') {
-    foot = `<p class="muted small media-foot">${vid && vid.by && !vid.own ? esc(t('videoBy', { by: vid.by })) + ' · ' : ''}${vid ? `<a href="https://www.youtube.com/watch?v=${encodeURIComponent(vid.v)}" target="_blank" rel="noopener">${esc(t('openYoutube'))}</a> · ` : ''}<button class="link" data-act="vid-edit" data-id="${id}">${esc(t(vid ? 'changeVideo' : 'addVideo'))}</button></p>`;
+    foot = `<p class="muted small media-foot">${vid && vid.by && !vid.own ? esc(t('videoBy', { by: vid.by })) + ' · ' : ''}${vid ? `<button class="link" data-act="open-url" data-url="https://www.youtube.com/watch?v=${encodeURIComponent(vid.v)}">${esc(t('openYoutube'))}</button> · ` : ''}<button class="link" data-act="vid-edit" data-id="${id}">${esc(t(vid ? 'changeVideo' : 'addVideo'))}</button></p>`;
     if (U.vidEdit === id) foot += `<div class="vid-edit"><input id="vid-url" data-id="${id}" inputmode="url" placeholder="https://youtu.be/…" value="${esc(vid && vid.own ? 'https://youtu.be/' + vid.v : '')}"><div class="row2"><button class="btn small primary" data-act="vid-save" data-id="${id}">${esc(t('save'))}</button>${vid && vid.own ? `<button class="btn small ghost" data-act="vid-reset" data-id="${id}">${esc(t('videoReset'))}</button>` : ''}</div><p class="muted small">${esc(t('videoEditNote'))}</p></div>`;
   } else if (m === 'draw') foot = `<p class="muted small media-foot">${esc(t('drawNote'))}</p>`;
   /* Record a clip at the gym (opens the camera) or pick one you already have. */
@@ -1223,7 +1246,7 @@ const SHEETS = {
       <ol class="rqs">${PK.READINESS_QS.map(q).join('')}</ol>
       <div class="field"><span>${esc(t('bpLabel'))}</span><div class="bp"><input type="number" inputmode="numeric" id="rBpS" placeholder="120" value="${esc(R.bpSys ?? '')}"><b>/</b><input type="number" inputmode="numeric" id="rBpD" placeholder="80" value="${esc(R.bpDia ?? '')}"><em>mmHg</em></div><small class="muted">${esc(t('bpNote'))}</small></div>
       ${anyYes ? `<p class="banner warn">${icon('alert')}${esc(t('readinessYes'))}</p><label class="switch"><input type="checkbox" id="rCleared" ${R.cleared ? 'checked' : ''}><span>${esc(t('clearedLabel'))}</span></label>` : complete ? `<p class="banner good">${icon('check')}${esc(t('readinessAllNo'))}</p>` : ''}
-      <p class="muted small">${esc(t('parqLink'))} <a href="https://eparmedx.com" target="_blank" rel="noopener">eparmedx.com</a></p>
+      <p class="muted small">${esc(t('parqLink'))} <button class="link" data-act="open-url" data-url="https://eparmedx.com">eparmedx.com</button></p>
       <button class="btn primary block" data-act="readiness-save" ${complete ? '' : 'disabled'}>${esc(t('save'))}</button>` };
   },
   baseline() {
@@ -1878,7 +1901,9 @@ function handleAct(act, b) {
     case 'focus-start': startFocus(id); break;
     case 'focus-end': S.focus = null; persist(); scheduleRender(); if (U.sheets.length) renderSheet(); toast(t('focusEnded')); break;
     case 'pick': openSheet('pick'); break;
-    case 'ex-media': U.exMedia = b.dataset.v; U.vidEdit = null; renderSheet(); break;
+    case 'ex-media': U.exMedia = b.dataset.v; U.vidEdit = null; U.ytPlay = null; renderSheet(); break;
+    case 'yt-play': if (navigator.onLine === false) { toast(t('videoOffline')); break; } U.ytPlay = id; renderSheet(); break;
+    case 'open-url': openExternal(b.dataset.url); break;
     case 'clip-rec': { const i = $('#clip-rec'); if (i) i.click(); break; }
     case 'clip-pick': { const i = $('#clip-pick'); if (i) i.click(); break; }
     case 'clip-del': openSheet('confirm', { msg: t('clipDelAsk'), yes: t('delete'), act: 'clip-del-yes', id }); break;
@@ -2040,7 +2065,7 @@ function bindEvents() {
   document.addEventListener('toggle', e => { if (e.target && e.target.id === 'coachMemBox') U.memOpen = e.target.open; }, true);
   initMemDrag();
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') { flushSave(); return; }
+    if (document.visibilityState === 'hidden') { flushSave(); stopVideos(); return; }
     readTanjur(); syncHealth(false); checkTanjur();
     if (U.rest && Date.now() >= U.rest.end) U.rest.alerted = true;
     scheduleRender();
@@ -2049,6 +2074,7 @@ function bindEvents() {
   window.addEventListener('popstate', () => { if (U.ignorePop) { U.ignorePop = false; return; } if (U.sheets.length) { popClosing = true; closeSheet(); popClosing = false; } });
   listen(Native.App, 'appUrlOpen', ev => route(ev && ev.url));
   listen(Native.App, 'backButton', onBack);
+  listen(Native.App, 'pause', () => { stopVideos(); if (U.sheets.length) renderSheet(); });
   listen(Native.Notif, 'localNotificationActionPerformed', ev => { const u = ev && ev.notification && ev.notification.extra && ev.notification.extra.url; if (u) route(u); else if (S.active) setTab('train'); });
 }
 /* Android Back: close the open sheet, then go back to Today, then leave the app. A running session is kept. */

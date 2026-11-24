@@ -136,18 +136,55 @@
     const P = (o, k, r) => `${f1(o[0] + nx * r * k)} ${f1(o[1] + ny * r * k)}`;
     return `<path class="${cls}" d="M${P(p, 1, r1)} L${P(q, 1, r2)} A${r2} ${r2} 0 0 0 ${P(q, -1, r2)} L${P(p, -1, r1)} A${r1} ${r1} 0 0 0 ${P(p, 1, r1)}Z"/>`;
   }
+  /* What moves: each body segment is followed over the whole cycle, both its direction and the angle at the joint that
+     drives it (hip for the thigh, knee for the shin, ankle for the foot, shoulder for the upper arm, elbow for the
+     forearm). One that turns 25° or more (the trunk 20°) is drawn in the accent colour, so you see at a glance which part
+     does the work, and that a plank holds still. spec.still lists parts that only ride along (arms in a squat), spec.work
+     parts that work even though they turn little.
+     The joint that travels furthest leaves a dotted path; spec.trace names it instead, or false for none. */
+  const SEGS = { torso: ['hip', 'sh'] };
+  [1, 2].forEach(i => Object.assign(SEGS, { ['th' + i]: ['h' + i, 'k' + i], ['sh' + i]: ['k' + i, 'a' + i], ['ft' + i]: ['a' + i, 't' + i], ['ua' + i]: ['s' + i, 'e' + i], ['fa' + i]: ['e' + i, 'w' + i] }));
+  const PARENT = { th: 'torso', sh: 'th', ft: 'sh', ua: 'torso', fa: 'ua' };
+  const TRACE_JOINTS = ['w1', 'a1', 'hip', 'sh', 'k1'];
+  /* the widest turn: the smallest arc that holds every sampled direction */
+  const spread = list => { const a = list.map(x => ((x % 360) + 360) % 360).sort((m, n) => m - n); let gap = 360 - a[a.length - 1] + a[0]; for (let i = 1; i < a.length; i++) gap = Math.max(gap, a[i] - a[i - 1]); return 360 - gap; };
+  function motion(spec) {
+    if (spec._motion) return spec._motion;
+    const N = 32, dirs = {}, rel = {}, pts = {};
+    for (let k = 0; k < N; k++) {
+      const { J } = place(poseAt(spec, k / N), spec.view), d = {};
+      for (const sg in SEGS) { d[sg] = angTo(J[SEGS[sg][0]], J[SEGS[sg][1]]); (dirs[sg] = dirs[sg] || []).push(d[sg]); }
+      for (const sg in SEGS) { const par = sg === 'torso' ? null : (PARENT[sg.slice(0, 2)] === 'torso' ? 'torso' : PARENT[sg.slice(0, 2)] + sg.slice(2)); if (par) (rel[sg] = rel[sg] || []).push(d[sg] - d[par]); }
+      TRACE_JOINTS.forEach(j => (pts[j] = pts[j] || []).push(J[j]));
+    }
+    const still = new Set(spec.still || []), work = new Set(spec.work || []), moving = {};
+    for (const sg in SEGS) moving[sg] = work.has(sg) || !still.has(sg) && (sg === 'torso' ? spread(dirs[sg]) >= 20 : Math.max(spread(dirs[sg]), spread(rel[sg])) >= 25);
+    let trace = spec.trace === false ? null : spec.trace || null;
+    if (spec.trace == null) {
+      let best = 0;
+      TRACE_JOINTS.forEach(j => { const P = pts[j]; let len = 0; for (let i = 1; i <= P.length; i++) len += dist(P[i - 1], P[i % P.length]); if (len > best + 8) { best = len; trace = j; } });
+      if (best < 50) trace = null;
+    }
+    spec._motion = { moving, trace, path: trace ? pts[trace] : null };
+    return spec._motion;
+  }
   /* SVG markup for one moment of an exercise. */
   function frameSVG(spec, phase) {
     const q = poseAt(spec, phase || 0);
     const { J } = place(q, spec.view);
+    const mo = motion(spec), mv = sg => mo.moving[sg];
     const props = spec.props || [];
     const pass = layer => props.filter(p => (p.layer || (p.j ? 'front' : 'back')) === layer).map(p => prop(Object.assign({}, p, { q }), J)).join('');
     const front = spec.view === 'front';
-    const limb = (i, cls) => ({
-      leg: cap(J['h' + i], J['k' + i], 8.6, 6.2, cls) + cap(J['k' + i], J['a' + i], 5.8, 3.9, cls) + cap(J['a' + i], J['t' + i], 4, 2.8, cls),
-      arm: cap(J['s' + i], J['e' + i], 6.2, 4.5, cls) + cap(J['e' + i], J['w' + i], 4.4, 3.2, cls) + circ(J['w' + i], 3.9, cls)
-    });
-    const far = limb(2, front ? 'fg-body' : 'fg-body-far'), near = limb(1, 'fg-body');
+    /* far limbs are a lighter tone (side view); moving segments use the accent */
+    const limb = (i, isFar) => {
+      const c = sg => (mv(sg + i) ? 'fg-move' : 'fg-body') + (isFar ? '-far' : '');
+      return {
+        leg: cap(J['h' + i], J['k' + i], 8.6, 6.2, c('th')) + cap(J['k' + i], J['a' + i], 5.8, 3.9, c('sh')) + cap(J['a' + i], J['t' + i], 4, 2.8, c('ft')),
+        arm: cap(J['s' + i], J['e' + i], 6.2, 4.5, c('ua')) + cap(J['e' + i], J['w' + i], 4.4, 3.2, c('fa')) + circ(J['w' + i], 3.9, c('fa'))
+      };
+    };
+    const far = limb(2, !front), near = limb(1, false), tc = mv('torso') ? 'fg-move' : 'fg-body';
     const farProps = props.filter(p => p.j && /2$/.test(p.j)).map(p => prop(Object.assign({}, p, { q }), J)).join('');
     const nearProps = props.filter(p => p.j && !/2$/.test(p.j)).map(p => prop(Object.assign({}, p, { q }), J)).join('');
     const neckTop = add(J.neck, q.hd, LEN.neck);
@@ -155,14 +192,15 @@
     if (front) {
       /* Shoulders wider than hips, joined into one shape, with the neck on top. */
       const poly = [J.s1, J.s2, J.h2, J.h1].map(p => `${f1(p[0])},${f1(p[1])}`).join(' ');
-      torso = `<polygon points="${poly}" class="fg-body fg-round"/>` + cap(J.h1, J.h2, 9, 9, 'fg-body') + cap(J.s1, J.s2, 7, 7, 'fg-body') + cap(J.neck, neckTop, 4.6, 4.2, 'fg-body');
+      torso = `<polygon points="${poly}" class="${tc} fg-round"/>` + cap(J.h1, J.h2, 9, 9, tc) + cap(J.s1, J.s2, 7, 7, tc) + cap(J.neck, neckTop, 4.6, 4.2, tc);
     } else {
-      torso = cap(J.hip, J.sh, 10.5, 12.5, 'fg-body') + cap(J.neck, neckTop, 4.8, 4.4, 'fg-body');
+      torso = cap(J.hip, J.sh, 10.5, 12.5, tc) + cap(J.neck, neckTop, 4.8, 4.4, tc);
     }
-    let head = circ(J.head, LEN.head + 0.5, 'fg-body');
+    let head = circ(J.head, LEN.head + 0.5, tc);
     if (!front) { const face = dir(q.hd - 90), up = dir(q.hd); head += circ([J.head[0] + face[0] * 5.2 + up[0] * 1.5, J.head[1] + face[1] * 5.2 + up[1] * 1.5], 1.7, 'fg-eye'); }
-    if (front) return `${pass('back')}${far.leg}${near.leg}${torso}${head}${farProps}${far.arm}${near.arm}${nearProps}`;
-    return `${pass('back')}${farProps}${far.leg}${far.arm}${torso}${head}${near.leg}${near.arm}${nearProps}`;
+    const trace = mo.path ? `<path class="fg-trace" d="M${mo.path.map(p => `${f1(p[0])} ${f1(p[1])}`).join(' L')}Z"/>` : '';
+    if (front) return `${pass('back')}${trace}${far.leg}${near.leg}${torso}${head}${farProps}${far.arm}${near.arm}${nearProps}`;
+    return `${pass('back')}${trace}${farProps}${far.leg}${far.arm}${torso}${head}${near.leg}${near.arm}${nearProps}`;
   }
   function svg(spec, phase, cls) {
     return `<svg class="${cls || 'move'}" viewBox="0 0 ${W} ${H}" role="img" aria-hidden="true">${frameSVG(spec, phase)}</svg>`;
@@ -181,5 +219,5 @@
     if (reduce) el.innerHTML = frameSVG(spec, 0.25); else raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }
-  return { LEN, W, H, GY, ik, place, poseAt, frameSVG, svg, play, dir, add };
+  return { LEN, W, H, GY, ik, place, poseAt, frameSVG, svg, play, dir, add, motion };
 });
